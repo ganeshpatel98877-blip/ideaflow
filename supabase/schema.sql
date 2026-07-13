@@ -29,7 +29,7 @@ create table profiles (
 );
 
 -- Auto-create a profile row whenever a new auth user signs up
-create function public.handle_new_user()
+create or replace function public.handle_new_user()
 returns trigger as $$
 begin
   insert into public.profiles (id, full_name, avatar_url)
@@ -174,7 +174,7 @@ create index idx_notifications_user on notifications (user_id, read);
 -- ---------------------------------------------------------------------------
 -- Helper: approval percentage + auto-approve trigger (75% rule)
 -- ---------------------------------------------------------------------------
-create function public.check_idea_approval()
+create or replace function public.check_idea_approval()
 returns trigger as $$
 declare
   approve_count int;
@@ -213,6 +213,20 @@ begin
     returning id into new_workspace_id;
 
     if new_workspace_id is not null then
+      -- Add the idea's creator as the workspace owner, and everyone who
+      -- voted "approve" as a member — otherwise nobody could see or work
+      -- in the workspace they just created (RLS restricts workspace
+      -- access to workspace_members).
+      insert into workspace_members (workspace_id, user_id, role)
+      select new_workspace_id, created_by, 'owner' from ideas where id = new.idea_id
+      on conflict (workspace_id, user_id) do nothing;
+
+      insert into workspace_members (workspace_id, user_id, role)
+      select new_workspace_id, user_id, 'member'
+      from idea_votes
+      where idea_id = new.idea_id and choice = 'approve'
+      on conflict (workspace_id, user_id) do nothing;
+
       insert into milestones (workspace_id, name, sort_order, completed, completed_at)
       values
         (new_workspace_id, 'Idea Approved', 1, true, now()),

@@ -40,7 +40,8 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Backend setup (Supabase)
 
-This repo now includes a real database layer. To wire it up:
+This repo now includes a real database layer, wired end to end — the UI reads
+and writes real data once this is set up:
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. Open the SQL editor in your Supabase dashboard and run the contents of
@@ -49,15 +50,44 @@ This repo now includes a real database layer. To wire it up:
    Security with policies for each table, and sets up a Postgres trigger that
    auto-approves ideas at 75% and auto-creates their workspace — no app code
    required for that rule.
-3. In your Supabase project → **Authentication → Providers**, enable Google,
-   GitHub, and/or Email (magic link) sign-in.
-4. Copy your project URL, anon key, and service role key from
+3. Copy your project URL, anon key, and service role key from
    **Settings → API** into `.env.local`.
-5. Restart `npm run dev` — `/login` will now issue real sessions, and
-   `/api/ideas`, `/api/ideas/[id]/vote`, and `/api/workspaces/[id]/tasks` read
-   and write to your database instead of in-memory seed data.
+4. Run `npm install && npm run dev` — `/login` already works via **email
+   magic link** with zero extra setup (Supabase enables email auth by
+   default). Google and GitHub sign-in are optional; see below if you want
+   them too.
+5. Once signed in, `/api/ideas`, `/api/ideas/[id]/vote`,
+   `/api/ideas/[id]/comments`, `/api/ideas/[id]/workspace`,
+   `/api/workspaces/[id]/tasks`, and `/api/workspaces/[id]/messages` all read
+   and write your real database — ideas, votes, comments, tasks, and chat
+   messages persist and are shared across everyone signed into the project.
 
-> The UI in `components/IdeaFlowApp.tsx` still renders from local seed state
+### Optional: enable Google / GitHub sign-in
+
+**Google:**
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → **Create Credentials → OAuth client ID** → Application type: **Web application**.
+2. Authorized redirect URI: `https://<your-project-ref>.supabase.co/auth/v1/callback` (find your project ref in the Supabase project URL).
+3. Copy the **Client ID** and **Client Secret**.
+4. In Supabase: **Authentication → Providers → Google** → paste both, toggle it on, Save.
+
+**GitHub:**
+1. [GitHub → Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers).
+2. Authorization callback URL: `https://<your-project-ref>.supabase.co/auth/v1/callback`.
+3. Copy the **Client ID** and generate a **Client Secret**.
+4. In Supabase: **Authentication → Providers → GitHub** → paste both, toggle it on, Save.
+
+That's it — the buttons in `app/login/page.tsx` will start working immediately, no code changes needed.
+
+> **Already ran `schema.sql` before this update?** Run
+> `supabase/migrations/002_fix_workspace_membership.sql` once in the SQL
+> editor. It fixes a bug where auto-created workspaces had no members, which
+> made them invisible to everyone but an Owner/Admin under RLS. It's safe to
+> run — it only replaces one function and backfills missing membership rows.
+
+> The UI in `components/IdeaFlowApp.jsx` still falls back to local seed state
+> when it receives no real ideas from the database (e.g. on first run before
+> anyone has created one) — so the app is never blank, and switches to fully
+> live data automatically once real rows exist.
 > by default — swap its `useState(seedIdeas)` etc. for `fetch` calls to the
 > routes above (or React Query/SWR) to make the whole app database-backed
 > end to end.
@@ -78,13 +108,15 @@ ideaflow/
 │   ├── layout.tsx
 │   └── page.tsx
 ├── components/
-│   └── IdeaFlowApp.tsx                  # the entire app UI (client component)
+│   └── IdeaFlowApp.jsx                  # the entire app UI (client component)
 ├── lib/supabase/
 │   ├── client.ts                        # browser Supabase client
 │   ├── server.ts                        # server Supabase client (+ service role)
 │   └── types.ts                         # hand-written DB types
 ├── middleware.ts                        # refreshes the auth session cookie
-├── supabase/schema.sql                  # full DB schema, RLS policies, triggers
+├── supabase/
+│   ├── schema.sql                       # full DB schema, RLS policies, triggers
+│   └── migrations/002_fix_workspace_membership.sql  # incremental fix, see below
 ├── PRD.md                               # full product requirements doc
 ├── .env.example
 └── package.json
@@ -107,22 +139,29 @@ committed.
 ## Deploying
 
 The easiest path is [Vercel](https://vercel.com/new) — import the GitHub repo,
-add `ANTHROPIC_API_KEY` under Project Settings → Environment Variables, and
-deploy.
+add `ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+and `SUPABASE_SERVICE_ROLE_KEY` under Project Settings → Environment
+Variables, and deploy. If you set up Google/GitHub OAuth, also add your
+production URL as an authorized redirect in both the provider console and
+Supabase → Authentication → URL Configuration.
 
 ## Next steps (to go from prototype to production)
 
-- **Wire the UI to the database** — `components/IdeaFlowApp.tsx` currently
-  renders from local seed state; point it at `/api/ideas`,
-  `/api/ideas/[id]/vote`, and `/api/workspaces/[id]/tasks` (already built,
-  see "Backend setup" above)
+The UI is now fully wired to Supabase — ideas, votes, comments, workspace
+tasks, and workspace chat all read and write real data (with the offline
+seed demo as a fallback when the database is empty). What's left:
+
 - **Real-time**: subscribe to Supabase Realtime channels on `messages` and
-  `tasks` so multiple users see live updates
+  `tasks` so multiple users see each other's updates live, instead of only
+  on refresh
 - **File storage**: the `documents` storage bucket + RLS policies are already
   in `supabase/schema.sql` — add an upload handler using
-  `supabase.storage.from('documents').upload(...)`
+  `supabase.storage.from('documents').upload(...)` (the Documents tab is
+  currently local-only)
 - **Workspace membership UI**: an invite flow that inserts into
-  `workspace_members` (table + policies already exist)
+  `workspace_members` (table + policies already exist) — right now the
+  approving team isn't automatically added as members, so add that on
+  workspace creation
 - **Notifications**: the `notifications` table exists — add a route that
   fans out a row to every workspace member on key events (idea approved,
   task assigned, etc.)
