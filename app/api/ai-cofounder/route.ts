@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// This route runs on the server so your ANTHROPIC_API_KEY is never exposed
+// This route runs on the server so your GEMINI_API_KEY is never exposed
 // to the browser. Set it in .env.local (see .env.example).
 export async function POST(req: NextRequest) {
   try {
@@ -10,10 +10,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing idea data" }, { status: 400 });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY is not set on the server" },
+        { error: "GEMINI_API_KEY is not set on the server" },
         { status: 500 }
       );
     }
@@ -34,31 +34,32 @@ Problem: ${idea.problem}
 Description: ${idea.description}
 Category: ${idea.category}`;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    const model = "gemini-2.5-flash";
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            maxOutputTokens: 1000,
+          },
+        }),
+      }
+    );
 
     if (!response.ok) {
       const errText = await response.text();
       return NextResponse.json(
-        { error: "Anthropic API error", detail: errText },
+        { error: "Gemini API error", detail: errText },
         { status: response.status }
       );
     }
 
     const data = await response.json();
-    const textBlock = (data.content || []).find((b: any) => b.type === "text");
-    const raw = textBlock ? textBlock.text : "";
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const clean = raw.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
 

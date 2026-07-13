@@ -14,7 +14,7 @@ This repo is a working Next.js prototype of the product described in `PRD.md`.
 - **Analytics** — member activity, idea status mix, task completion charts
 - **Global search + notifications**
 - **Light / dark theme toggle**
-- **AI Co-Founder** — real Claude API call (market analysis, competitors, revenue
+- **AI Co-Founder** — real Gemini API call (market analysis, competitors, revenue
   ideas, tech stack, risks, roadmap), proxied through a server route so your API
   key is never exposed to the browser
 
@@ -30,7 +30,7 @@ npm install
 # 2. Add your environment variables
 cp .env.example .env.local
 # then edit .env.local — see "Backend setup" below for Supabase, and
-# paste your Claude key from https://console.anthropic.com/
+# paste your Gemini key from https://aistudio.google.com/apikey
 
 # 3. Run the dev server
 npm run dev
@@ -98,7 +98,7 @@ That's it — the buttons in `app/login/page.tsx` will start working immediately
 ideaflow/
 ├── app/
 │   ├── api/
-│   │   ├── ai-cofounder/route.ts        # Claude API proxy (server-side key)
+│   │   ├── ai-cofounder/route.ts        # Gemini API proxy (server-side key)
 │   │   ├── ideas/route.ts               # GET (list) / POST (create) ideas
 │   │   ├── ideas/[id]/vote/route.ts     # POST — cast/update a vote
 │   │   └── workspaces/[id]/tasks/route.ts  # GET/POST/PATCH — Kanban tasks
@@ -139,7 +139,7 @@ committed.
 ## Deploying
 
 The easiest path is [Vercel](https://vercel.com/new) — import the GitHub repo,
-add `ANTHROPIC_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+add `GEMINI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
 and `SUPABASE_SERVICE_ROLE_KEY` under Project Settings → Environment
 Variables, and deploy. If you set up Google/GitHub OAuth, also add your
 production URL as an authorized redirect in both the provider console and
@@ -169,4 +169,4 @@ seed demo as a fallback when the database is empty). What's left:
 ## Tech stack
 
 Next.js 14 (App Router) · TypeScript · React 18 · Recharts · Lucide Icons ·
-Claude API (`claude-sonnet-4-6`)
+Gemini API (`gemini-2.5-flash`)
