@@ -7,15 +7,58 @@ import {
   Clock, TrendingUp, X, Loader2, ChevronRight, Bell, Rocket, Target,
   DollarSign, Cpu, AlertTriangle, Map, Megaphone, ArrowRight, Send,
   Flag, Circle, CheckCircle, FileText, Upload, Download, BarChart3,
-  Trophy, Activity, Sun, Moon
+  Trophy, Activity, Sun, Moon, LogOut
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from "recharts";
+import { createClient } from "@/lib/supabase/client";
 
 const TASK_COLUMNS = ["To Do", "In Progress", "Review", "Completed"];
 const DOC_FOLDERS = ["Business Plans", "Pitch Decks", "Research", "Design", "Technical"];
+
+// --- DB <-> UI mapping helpers ------------------------------------------
+// The UI works in Title Case ("Approved", "To Do", "High") for readability;
+// the database uses snake_case enums ("approved", "todo", "high"). These
+// helpers translate between the two so real Supabase rows drop straight
+// into the same components used for the offline demo/seed data.
+
+const mapDbIdea = (row) => ({
+  id: row.id,
+  title: row.title,
+  problem: row.problem || "",
+  description: row.description || "",
+  category: row.category || "General",
+  creator: row.creatorName || "Unknown",
+  votes: row.votes || { approve: 0, reject: 0, neutral: 0 },
+  status: row.status === "approved" ? "Approved" : row.status === "rejected" ? "Rejected" : "Discussion",
+  comments: [],
+});
+
+const dbStatusToUi = { todo: "To Do", in_progress: "In Progress", review: "Review", completed: "Completed" };
+const uiStatusToDb = { "To Do": "todo", "In Progress": "in_progress", "Review": "review", "Completed": "completed" };
+const dbPriorityToUi = { low: "Low", medium: "Medium", high: "High" };
+
+const mapDbTask = (row) => ({
+  id: row.id,
+  title: row.title,
+  assignee: row.profiles?.full_name || "Unassigned",
+  priority: dbPriorityToUi[row.priority] || "Medium",
+  status: dbStatusToUi[row.status] || "To Do",
+});
+
+const mapDbMessage = (row) => ({
+  id: row.id,
+  author: row.profiles?.full_name || "Someone",
+  text: row.body,
+});
+
+const mapDbComment = (row) => ({
+  id: row.id,
+  author: row.profiles?.full_name || "Someone",
+  text: row.body,
+});
 
 const seedWorkspaceData = {
   2: {
@@ -92,13 +135,15 @@ function approvalPct(votes) {
   return Math.round((votes.approve / total) * 100);
 }
 
-function Sidebar({ tab, setTab, theme, onToggleTheme }) {
+function Sidebar({ tab, setTab, theme, onToggleTheme, currentUser, onSignOut }) {
   const items = [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { key: "ideas", label: "Ideas", icon: Lightbulb },
     { key: "workspaces", label: "Workspaces", icon: FolderKanban },
     { key: "analytics", label: "Analytics", icon: BarChart3 },
   ];
+  const name = currentUser?.name || "Guest";
+  const role = currentUser?.role ? currentUser.role[0].toUpperCase() + currentUser.role.slice(1) : "Demo";
   return (
     <div className="if-sidebar">
       <div className="if-logo">
@@ -123,11 +168,16 @@ function Sidebar({ tab, setTab, theme, onToggleTheme }) {
           <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
         </button>
         <div className="if-user-chip">
-          <div className="if-avatar">G</div>
+          <div className="if-avatar">{name[0]?.toUpperCase()}</div>
           <div>
-            <div className="if-user-name">Ganesh Rao</div>
-            <div className="if-user-role">Owner</div>
+            <div className="if-user-name">{name}</div>
+            <div className="if-user-role">{role}</div>
           </div>
+          {currentUser && (
+            <button className="if-icon-btn" onClick={onSignOut} title="Sign out">
+              <LogOut size={14} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -499,6 +549,27 @@ function AICoFounder({ idea }) {
 
 function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications }) {
   const [comment, setComment] = useState("");
+  const [comments, setComments] = useState(idea.comments || []);
+
+  useEffect(() => {
+    setComments(idea.comments || []);
+    let ignore = false;
+    fetch(`/api/ideas/${idea.id}/comments`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((rows) => {
+        if (!ignore && rows && rows.length) {
+          setComments(rows.map((r) => ({ id: r.id, author: r.profiles?.full_name || "Someone", text: r.body })));
+        }
+      })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, [idea.id]);
+
+  const postComment = (text) => {
+    setComments((c) => [...c, { id: "temp-" + Date.now(), author: "You", text }]);
+    onComment(idea.id, text);
+  };
+
   return (
     <div>
       <Topbar title={idea.title} ideas={allIdeas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} />
@@ -523,9 +594,9 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
             </div>
 
             <div className="if-panel">
-              <div className="if-panel-header"><h3>Discussion ({idea.comments.length})</h3></div>
+              <div className="if-panel-header"><h3>Discussion ({comments.length})</h3></div>
               <div className="if-comments">
-                {idea.comments.map((c) => (
+                {comments.map((c) => (
                   <div className="if-comment" key={c.id}>
                     <div className="if-avatar sm">{c.author[0]}</div>
                     <div>
@@ -534,7 +605,7 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
                     </div>
                   </div>
                 ))}
-                {idea.comments.length === 0 && <p className="if-ai-empty">No comments yet — start the discussion.</p>}
+                {comments.length === 0 && <p className="if-ai-empty">No comments yet — start the discussion.</p>}
               </div>
               <div className="if-comment-input">
                 <input
@@ -543,7 +614,7 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
                   onChange={(e) => setComment(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && comment.trim()) {
-                      onComment(idea.id, comment.trim());
+                      postComment(comment.trim());
                       setComment("");
                     }
                   }}
@@ -552,7 +623,7 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
                   className="if-btn-primary sm"
                   onClick={() => {
                     if (comment.trim()) {
-                      onComment(idea.id, comment.trim());
+                      postComment(comment.trim());
                       setComment("");
                     }
                   }}
@@ -898,8 +969,13 @@ function AnalyticsPage({ ideas, workspaceData, onGoToIdea, onGoToWorkspace, noti
   );
 }
 
-export default function IdeaFlowApp() {
-  const [ideas, setIdeas] = useState(seedIdeas);
+export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
+  const supabase = useRef(typeof window !== "undefined" ? createClient() : null).current;
+
+  const [ideas, setIdeas] = useState(
+    initialIdeas.length ? initialIdeas.map(mapDbIdea) : seedIdeas
+  );
+  const isLive = initialIdeas.length > 0; // true once real Supabase data is flowing
   const [tab, setTab] = useState("dashboard");
   const [theme, setTheme] = useState("dark");
   const [selectedId, setSelectedId] = useState(null);
@@ -920,7 +996,40 @@ export default function IdeaFlowApp() {
   const ensureWorkspace = (id) =>
     workspaceData[id] || { tasks: [], messages: [] };
 
+  // When a real (approved) idea's workspace is opened, pull its live tasks,
+  // messages, and documents from the database. Falls back to whatever is
+  // already in local workspaceData (e.g. seed demo data) if there's no
+  // matching row yet — so the UI never goes blank.
+  useEffect(() => {
+    if (!isLive || !selectedWorkspaceId) return;
+    let ignore = false;
+    fetch(`/api/ideas/${selectedWorkspaceId}/workspace`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (ignore || !data.workspace) return;
+        setWorkspaceData((prev) => ({
+          ...prev,
+          [selectedWorkspaceId]: {
+            workspaceId: data.workspace.id,
+            tasks: (data.tasks || []).map(mapDbTask),
+            messages: (data.messages || []).map(mapDbMessage),
+            documents: (data.documents || []).map((d) => ({
+              id: d.id,
+              name: d.name,
+              folder: d.folder,
+              uploadedBy: d.profiles?.full_name || "Someone",
+              size: d.size_bytes ? `${(d.size_bytes / 1024 / 1024).toFixed(1)} MB` : "—",
+              version: d.version,
+            })),
+          },
+        }));
+      })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, [isLive, selectedWorkspaceId]);
+
   const moveTask = (workspaceId, taskId, newStatus) => {
+    // optimistic local update first
     setWorkspaceData((prev) => {
       const ws = prev[workspaceId] || { tasks: [], messages: [] };
       return {
@@ -931,9 +1040,40 @@ export default function IdeaFlowApp() {
         },
       };
     });
+    const realWsId = workspaceData[workspaceId]?.workspaceId;
+    if (isLive && realWsId) {
+      fetch(`/api/workspaces/${realWsId}/tasks`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, status: uiStatusToDb[newStatus] }),
+      }).catch(() => {});
+    }
   };
 
   const addTask = (workspaceId, title) => {
+    const realWsId = workspaceData[workspaceId]?.workspaceId;
+    if (isLive && realWsId) {
+      fetch(`/api/workspaces/${realWsId}/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((row) => {
+          setWorkspaceData((prev) => {
+            const ws = prev[workspaceId] || { tasks: [], messages: [] };
+            return { ...prev, [workspaceId]: { ...ws, tasks: [...ws.tasks, mapDbTask({ ...row, profiles: { full_name: currentUser?.name } })] } };
+          });
+        })
+        .catch(() => {
+          setWorkspaceData((prev) => {
+            const ws = prev[workspaceId] || { tasks: [], messages: [] };
+            const nextId = ws.tasks.length ? Math.max(...ws.tasks.map((t) => t.id)) + 1 : 1;
+            return { ...prev, [workspaceId]: { ...ws, tasks: [...ws.tasks, { id: nextId, title, assignee: "You", priority: "Medium", status: "To Do" }] } };
+          });
+        });
+      return;
+    }
     setWorkspaceData((prev) => {
       const ws = prev[workspaceId] || { tasks: [], messages: [] };
       const nextId = ws.tasks.length ? Math.max(...ws.tasks.map((t) => t.id)) + 1 : 1;
@@ -948,6 +1088,29 @@ export default function IdeaFlowApp() {
   };
 
   const sendMessage = (workspaceId, text) => {
+    const realWsId = workspaceData[workspaceId]?.workspaceId;
+    if (isLive && realWsId) {
+      fetch(`/api/workspaces/${realWsId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((row) => {
+          setWorkspaceData((prev) => {
+            const ws = prev[workspaceId] || { tasks: [], messages: [] };
+            return { ...prev, [workspaceId]: { ...ws, messages: [...ws.messages, mapDbMessage({ ...row, profiles: { full_name: currentUser?.name } })] } };
+          });
+        })
+        .catch(() => {
+          setWorkspaceData((prev) => {
+            const ws = prev[workspaceId] || { tasks: [], messages: [] };
+            const nextId = ws.messages.length ? Math.max(...ws.messages.map((m) => m.id)) + 1 : 1;
+            return { ...prev, [workspaceId]: { ...ws, messages: [...ws.messages, { id: nextId, author: "You", text }] } };
+          });
+        });
+      return;
+    }
     setWorkspaceData((prev) => {
       const ws = prev[workspaceId] || { tasks: [], messages: [] };
       const nextId = ws.messages.length ? Math.max(...ws.messages.map((m) => m.id)) + 1 : 1;
@@ -959,6 +1122,7 @@ export default function IdeaFlowApp() {
   };
 
   const uploadDoc = (workspaceId) => {
+    // Document storage upload isn't wired up yet (see README) — stays local-only for now.
     setWorkspaceData((prev) => {
       const ws = prev[workspaceId] || { tasks: [], messages: [], documents: [] };
       const docs = ws.documents || [];
@@ -976,6 +1140,26 @@ export default function IdeaFlowApp() {
   };
 
   const vote = (id, kind) => {
+    if (isLive) {
+      fetch(`/api/ideas/${id}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ choice: kind }),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then(({ idea }) => {
+          if (!idea) return;
+          setIdeas((prev) =>
+            prev.map((i) =>
+              i.id === id
+                ? { ...i, votes: { ...i.votes, [kind]: (i.votes[kind] || 0) + 1 }, status: idea.status === "approved" ? "Approved" : "Discussion" }
+                : i
+            )
+          );
+        })
+        .catch(() => {});
+      return;
+    }
     setIdeas((prev) =>
       prev.map((idea) => {
         if (idea.id !== id) return idea;
@@ -987,6 +1171,25 @@ export default function IdeaFlowApp() {
   };
 
   const addComment = (id, text) => {
+    if (isLive) {
+      fetch(`/api/ideas/${id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((row) => {
+          setIdeas((prev) =>
+            prev.map((idea) =>
+              idea.id === id
+                ? { ...idea, comments: [...idea.comments, mapDbComment({ ...row, profiles: { full_name: currentUser?.name } })] }
+                : idea
+            )
+          );
+        })
+        .catch(() => {});
+      return;
+    }
     setIdeas((prev) =>
       prev.map((idea) =>
         idea.id === id
@@ -997,6 +1200,23 @@ export default function IdeaFlowApp() {
   };
 
   const createIdea = (form) => {
+    if (isLive) {
+      fetch("/api/ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((row) => {
+          setIdeas((prev) => [
+            mapDbIdea({ ...row, creatorName: currentUser?.name, votes: { approve: 0, reject: 0, neutral: 0 } }),
+            ...prev,
+          ]);
+          setTab("ideas");
+        })
+        .catch(() => {});
+      return;
+    }
     const newIdea = {
       id: Math.max(...ideas.map((i) => i.id)) + 1,
       title: form.title,
@@ -1010,6 +1230,10 @@ export default function IdeaFlowApp() {
     };
     setIdeas((prev) => [newIdea, ...prev]);
     setTab("ideas");
+  };
+
+  const signOut = () => {
+    supabase?.auth.signOut().then(() => window.location.reload());
   };
 
   return (
@@ -1274,6 +1498,8 @@ export default function IdeaFlowApp() {
         setTab={(t) => { setSelectedId(null); setSelectedWorkspaceId(null); setTab(t); }}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        currentUser={currentUser}
+        onSignOut={signOut}
       />
       <div>
         {selectedIdea ? (
