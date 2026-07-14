@@ -1,14 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Rocket, Github, Mail, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const supabase = createClient();
+  const router = useRouter();
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const oauthLogin = async (provider: "google" | "github") => {
@@ -24,13 +28,31 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    });
+    // No emailRedirectTo here on purpose — we're using the 6-digit code flow
+    // below instead of the magic link, which avoids failures when the link
+    // is opened in a different browser/session (common in Codespaces where
+    // the email client isn't the same browser as the dev server tab).
+    const { error } = await supabase.auth.signInWithOtp({ email });
     setLoading(false);
     if (error) setError(error.message);
     else setSent(true);
+  };
+
+  const verifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerifying(true);
+    setError(null);
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: code.trim(),
+      type: "email",
+    });
+    setVerifying(false);
+    if (error) setError(error.message);
+    else {
+      router.push("/");
+      router.refresh();
+    }
   };
 
   return (
@@ -59,11 +81,7 @@ export default function LoginPage() {
           <span style={styles.dividerLine} />
         </div>
 
-        {sent ? (
-          <p style={styles.sentText}>
-            Check <strong>{email}</strong> for a magic sign-in link.
-          </p>
-        ) : (
+        {!sent ? (
           <form onSubmit={emailLogin} style={styles.form}>
             <div style={styles.inputWrap}>
               <Mail size={15} color="#8b91a3" />
@@ -78,7 +96,37 @@ export default function LoginPage() {
             </div>
             <button type="submit" style={styles.submitBtn} disabled={loading}>
               {loading ? <Loader2 size={14} className="spin" /> : null}
-              {loading ? "Sending link..." : "Continue with Email"}
+              {loading ? "Sending code..." : "Continue with Email"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={verifyCode} style={styles.form}>
+            <p style={styles.sentText}>
+              We sent a 6-digit code to <strong>{email}</strong>. Enter it
+              below — don't click the link in the email, just use the code.
+            </p>
+            <div style={styles.inputWrap}>
+              <input
+                type="text"
+                inputMode="numeric"
+                required
+                placeholder="123456"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                style={{ ...styles.input, letterSpacing: 4, textAlign: "center" }}
+                maxLength={6}
+              />
+            </div>
+            <button type="submit" style={styles.submitBtn} disabled={verifying}>
+              {verifying ? <Loader2 size={14} className="spin" /> : null}
+              {verifying ? "Verifying..." : "Verify & Sign in"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSent(false); setCode(""); setError(null); }}
+              style={styles.backBtn}
+            >
+              Use a different email
             </button>
           </form>
         )}
@@ -116,6 +164,7 @@ const styles: Record<string, React.CSSProperties> = {
   inputWrap: { display: "flex", alignItems: "center", gap: 8, background: "#0a0c12", border: "1px solid #1f2330", borderRadius: 8, padding: "10px 12px" },
   input: { flex: 1, background: "transparent", border: "none", outline: "none", color: "#eef0f5", fontSize: 13.5, fontFamily: "inherit" },
   submitBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#7c6fff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 14px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" },
-  sentText: { color: "#c8cad6", fontSize: 13, lineHeight: 1.6 },
+  sentText: { color: "#c8cad6", fontSize: 13, lineHeight: 1.6, margin: "0 0 4px" },
+  backBtn: { background: "transparent", border: "none", color: "#8b91a3", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 4 },
   error: { color: "#ef5b6b", fontSize: 12.5, marginTop: 14 },
 };
