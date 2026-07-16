@@ -10,7 +10,9 @@ This repo is a working Next.js prototype of the product described in `PRD.md`.
 - **Dashboard** — stats + live activity feed
 - **Ideas** — create, vote (75% approval rule), discuss, AI Co-Founder analysis
 - **Workspaces** — auto-created on approval: Kanban task board (drag & drop),
-  team chat, document library, milestone tracker
+  real-time WhatsApp-style team chat, document library, milestone tracker
+- **Admin Panel** (`/admin`, Owners/Admins only) — view all team members,
+  change roles, invite new teammates by email, see all workspaces
 - **Analytics** — member activity, idea status mix, task completion charts
 - **Global search + notifications**
 - **Light / dark theme toggle**
@@ -78,11 +80,26 @@ and writes real data once this is set up:
 
 That's it — the buttons in `app/login/page.tsx` will start working immediately, no code changes needed.
 
-> **Already ran `schema.sql` before this update?** Run
-> `supabase/migrations/002_fix_workspace_membership.sql` once in the SQL
-> editor. It fixes a bug where auto-created workspaces had no members, which
-> made them invisible to everyone but an Owner/Admin under RLS. It's safe to
-> run — it only replaces one function and backfills missing membership rows.
+### Admin Panel access
+
+Every new sign-up gets `role = 'member'` by default (see the
+`handle_new_user` trigger in `schema.sql`). To access `/admin`, make your own
+account an Owner once, directly in the SQL editor:
+
+```sql
+update profiles set role = 'owner' where id =
+  (select id from auth.users where email = 'you@example.com');
+```
+
+After that, use the Admin Panel itself to promote/invite everyone else —
+Owners and Admins can change any member's role and send email invites from
+there. Invites and role changes both require `SUPABASE_SERVICE_ROLE_KEY` to
+be set in `.env.local`.
+
+> **Already ran `schema.sql` before this update?** Run the files in
+> `supabase/migrations/` (002, 003, 004) once each in the SQL editor, in
+> order. They fix a workspace-membership bug, add an Admin Panel permission
+> policy, and enable Realtime for live chat — all safe, additive changes.
 
 > The UI in `components/IdeaFlowApp.jsx` still falls back to local seed state
 > when it receives no real ideas from the database (e.g. on first run before
@@ -97,18 +114,25 @@ That's it — the buttons in `app/login/page.tsx` will start working immediately
 ```
 ideaflow/
 ├── app/
+│   ├── admin/page.tsx                   # Admin Panel (Owners/Admins only)
 │   ├── api/
+│   │   ├── admin/invite/route.ts        # POST — invite a teammate by email
+│   │   ├── admin/role/route.ts          # POST — change a member's role
 │   │   ├── ai-cofounder/route.ts        # Gemini API proxy (server-side key)
 │   │   ├── ideas/route.ts               # GET (list) / POST (create) ideas
 │   │   ├── ideas/[id]/vote/route.ts     # POST — cast/update a vote
-│   │   └── workspaces/[id]/tasks/route.ts  # GET/POST/PATCH — Kanban tasks
+│   │   ├── ideas/[id]/comments/route.ts # GET/POST — idea discussion
+│   │   ├── ideas/[id]/workspace/route.ts # GET — a workspace + its data
+│   │   ├── workspaces/[id]/tasks/route.ts    # GET/POST/PATCH — Kanban tasks
+│   │   └── workspaces/[id]/messages/route.ts # GET/POST — team chat
 │   ├── auth/callback/route.ts           # OAuth + magic-link session exchange
 │   ├── login/page.tsx                   # Google / GitHub / Email sign-in
 │   ├── globals.css
 │   ├── layout.tsx
 │   └── page.tsx
 ├── components/
-│   └── IdeaFlowApp.jsx                  # the entire app UI (client component)
+│   ├── IdeaFlowApp.jsx                  # the main app UI (client component)
+│   └── AdminPanel.jsx                   # the Admin Panel UI (client component)
 ├── lib/supabase/
 │   ├── client.ts                        # browser Supabase client
 │   ├── server.ts                        # server Supabase client (+ service role)
@@ -116,7 +140,7 @@ ideaflow/
 ├── middleware.ts                        # refreshes the auth session cookie
 ├── supabase/
 │   ├── schema.sql                       # full DB schema, RLS policies, triggers
-│   └── migrations/002_fix_workspace_membership.sql  # incremental fix, see below
+│   └── migrations/                      # incremental fixes, see below
 ├── PRD.md                               # full product requirements doc
 ├── .env.example
 └── package.json
@@ -149,22 +173,22 @@ Supabase → Authentication → URL Configuration.
 
 The UI is now fully wired to Supabase — ideas, votes, comments, workspace
 tasks, and workspace chat all read and write real data (with the offline
-seed demo as a fallback when the database is empty). What's left:
+seed demo as a fallback when the database is empty). Workspace chat is also
+real-time (Supabase Realtime), and there's a working Admin Panel for team
+management. What's left:
 
-- **Real-time**: subscribe to Supabase Realtime channels on `messages` and
-  `tasks` so multiple users see each other's updates live, instead of only
-  on refresh
 - **File storage**: the `documents` storage bucket + RLS policies are already
   in `supabase/schema.sql` — add an upload handler using
   `supabase.storage.from('documents').upload(...)` (the Documents tab is
   currently local-only)
-- **Workspace membership UI**: an invite flow that inserts into
-  `workspace_members` (table + policies already exist) — right now the
-  approving team isn't automatically added as members, so add that on
-  workspace creation
+- **Task board real-time**: `messages` already broadcasts live (see
+  `WorkspaceChat` in `components/IdeaFlowApp.jsx`) — the Kanban board doesn't
+  yet, so two people moving cards at once won't see each other's moves
+  without a refresh. Same `postgres_changes` pattern, applied to `tasks`.
 - **Notifications**: the `notifications` table exists — add a route that
   fans out a row to every workspace member on key events (idea approved,
-  task assigned, etc.)
+  task assigned, etc.), and a bell-icon UI that reads from it instead of the
+  current hardcoded demo list
 
 ## Tech stack
 

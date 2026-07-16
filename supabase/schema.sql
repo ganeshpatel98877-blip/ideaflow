@@ -266,6 +266,10 @@ create policy "profiles are viewable by authenticated users"
   on profiles for select using (auth.role() = 'authenticated');
 create policy "users can update own profile"
   on profiles for update using (auth.uid() = id);
+create policy "owners and admins can update any profile"
+  on profiles for update using (
+    exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('owner', 'admin'))
+  );
 
 -- Ideas: any authenticated user can read/create; only the creator or an admin/owner can edit
 create policy "ideas are viewable by authenticated users"
@@ -345,6 +349,11 @@ create policy "users see their own notifications"
   on notifications for select using (auth.uid() = user_id);
 create policy "users can mark their own notifications read"
   on notifications for update using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- Realtime — required for the live workspace chat to receive new messages
+-- ---------------------------------------------------------------------------
+alter publication supabase_realtime add table messages;
 
 -- ---------------------------------------------------------------------------
 -- Storage bucket for documents (run once)

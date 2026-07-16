@@ -7,7 +7,7 @@ import {
   Clock, TrendingUp, X, Loader2, ChevronRight, Bell, Rocket, Target,
   DollarSign, Cpu, AlertTriangle, Map, Megaphone, ArrowRight, Send,
   Flag, Circle, CheckCircle, FileText, Upload, Download, BarChart3,
-  Trophy, Activity, Sun, Moon, LogOut
+  Trophy, Activity, Sun, Moon, LogOut, Shield
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -163,6 +163,12 @@ function Sidebar({ tab, setTab, theme, onToggleTheme, currentUser, onSignOut }) 
         ))}
       </nav>
       <div className="if-sidebar-footer">
+        {currentUser && ["owner", "admin"].includes(currentUser.role) && (
+          <a href="/admin" className="if-theme-toggle" style={{ textDecoration: "none" }}>
+            <Shield size={14} />
+            <span>Admin Panel</span>
+          </a>
+        )}
         <button className="if-theme-toggle" onClick={onToggleTheme}>
           {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
           <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
@@ -777,23 +783,68 @@ function KanbanBoard({ tasks, onMove, onAdd }) {
   );
 }
 
-function WorkspaceChat({ messages, onSend }) {
+function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
   const [text, setText] = useState("");
+  const [liveMessages, setLiveMessages] = useState(messages);
   const endRef = useRef(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
+  const supabaseRef = useRef(typeof window !== "undefined" ? createClient() : null);
+
+  useEffect(() => { setLiveMessages(messages); }, [messages]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [liveMessages.length]);
+
+  // Real-time: subscribe to new chat rows for this workspace so every
+  // member sees messages arrive instantly, WhatsApp-style, without refresh.
+  useEffect(() => {
+    if (!isLive || !workspaceId || !supabaseRef.current) return;
+    const channel = supabaseRef.current
+      .channel(`workspace-chat-${workspaceId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `workspace_id=eq.${workspaceId}` },
+        async (payload) => {
+          setLiveMessages((prev) => (prev.some((m) => m.id === payload.new.id) ? prev : prev));
+          // Skip if this is our own optimistically-added message (already shown).
+          if (currentUser && payload.new.user_id === currentUser.id) return;
+          let authorName = "Someone";
+          try {
+            const { data } = await supabaseRef.current
+              .from("profiles")
+              .select("full_name")
+              .eq("id", payload.new.user_id)
+              .single();
+            if (data?.full_name) authorName = data.full_name;
+          } catch {}
+          setLiveMessages((prev) =>
+            prev.some((m) => m.id === payload.new.id)
+              ? prev
+              : [...prev, { id: payload.new.id, author: authorName, text: payload.new.body, userId: payload.new.user_id }]
+          );
+        }
+      )
+      .subscribe();
+    return () => { supabaseRef.current.removeChannel(channel); };
+  }, [isLive, workspaceId, currentUser]);
+
   return (
-    <div className="if-panel">
-      <div className="if-panel-header"><h3>Team Discussion</h3></div>
-      <div className="if-chat-scroll">
-        {messages.map((m) => (
-          <div className="if-comment" key={m.id}>
-            <div className="if-avatar sm">{m.author[0]}</div>
-            <div>
-              <div className="if-comment-author">{m.author}</div>
-              <div className="if-comment-text">{m.text}</div>
+    <div className="if-panel if-whatsapp-panel">
+      <div className="if-panel-header">
+        <h3><MessageSquare size={15} style={{ marginRight: 6, verticalAlign: -2 }} />Team Discussion</h3>
+        {isLive && <span className="if-live-dot" title="Live"><span /> Live</span>}
+      </div>
+      <div className="if-chat-scroll if-wa-scroll">
+        {liveMessages.map((m) => {
+          const mine = currentUser && (m.author === currentUser.name || m.userId === currentUser.id);
+          return (
+            <div className={"if-wa-row" + (mine ? " mine" : "")} key={m.id}>
+              {!mine && <div className="if-avatar sm">{m.author[0]}</div>}
+              <div className={"if-wa-bubble" + (mine ? " mine" : "")}>
+                {!mine && <div className="if-wa-author">{m.author}</div>}
+                <div className="if-wa-text">{m.text}</div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
+        {liveMessages.length === 0 && <p className="if-ai-empty">No messages yet — say hi to the team.</p>}
         <div ref={endRef} />
       </div>
       <div className="if-comment-input">
@@ -846,7 +897,7 @@ function DocumentsPanel({ documents, onUpload }) {
   );
 }
 
-function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessage, onUploadDoc, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications }) {
+function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessage, onUploadDoc, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, currentUser, isLive }) {
   const [tab, setTab] = useState("board");
   const milestones = [
     { name: "Idea Approved", done: true },
@@ -871,7 +922,7 @@ function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessag
           <KanbanBoard tasks={ws.tasks} onMove={onMoveTask} onAdd={onAddTask} />
         )}
         {tab === "discussion" && (
-          <WorkspaceChat messages={ws.messages} onSend={onSendMessage} />
+          <WorkspaceChat messages={ws.messages} onSend={onSendMessage} workspaceId={ws.workspaceId} currentUser={currentUser} isLive={isLive} />
         )}
         {tab === "documents" && (
           <DocumentsPanel documents={ws.documents || []} onUpload={onUploadDoc} />
@@ -1445,6 +1496,17 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
         .if-task-move { background:var(--accent-soft); border:none; color:var(--accent); width:24px; height:24px; border-radius:6px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
 
         .if-chat-scroll { display:flex; flex-direction:column; gap:12px; max-height:360px; overflow-y:auto; margin-bottom:10px; padding-right:4px; }
+        .if-wa-scroll { max-height:420px; gap:8px; padding:4px 6px; }
+        .if-wa-row { display:flex; align-items:flex-end; gap:8px; max-width:78%; }
+        .if-wa-row.mine { margin-left:auto; flex-direction:row-reverse; }
+        .if-wa-bubble { background:var(--sunken); border:1px solid var(--panel-border); border-radius:14px 14px 14px 4px; padding:8px 12px; }
+        .if-wa-bubble.mine { background:var(--accent); border-color:var(--accent); border-radius:14px 14px 4px 14px; }
+        .if-wa-author { font-size:11px; font-weight:700; color:var(--accent-text); margin-bottom:2px; }
+        .if-wa-text { font-size:13px; color:var(--text); line-height:1.45; word-break:break-word; }
+        .if-wa-bubble.mine .if-wa-text { color:#fff; }
+        .if-live-dot { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--approve); font-weight:600; }
+        .if-live-dot span { width:7px; height:7px; border-radius:50%; background:var(--approve); display:inline-block; animation: if-pulse 1.6s ease-in-out infinite; }
+        @keyframes if-pulse { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
 
         .if-milestones { display:flex; flex-direction:column; gap:12px; }
         .if-milestone-row { display:flex; align-items:center; gap:10px; font-size:13px; }
@@ -1528,6 +1590,8 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
             onGoToIdea={(id) => { setSelectedWorkspaceId(null); setSelectedId(id); }}
             onGoToWorkspace={setSelectedWorkspaceId}
             notifications={notifications}
+            currentUser={currentUser}
+            isLive={isLive}
           />
         ) : tab === "dashboard" ? (
           <Dashboard ideas={ideas} setTab={setTab} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} />
