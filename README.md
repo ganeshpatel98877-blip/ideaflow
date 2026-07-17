@@ -173,22 +173,20 @@ Supabase → Authentication → URL Configuration.
 
 The UI is now fully wired to Supabase — ideas, votes, comments, workspace
 tasks, and workspace chat all read and write real data (with the offline
-seed demo as a fallback when the database is empty). Workspace chat is also
-real-time (Supabase Realtime), and there's a working Admin Panel for team
-management. What's left:
+seed demo as a fallback when the database is empty). Workspace chat and the
+Kanban board are both real-time (Supabase Realtime), real notifications fire
+on idea approval / comments / task assignment, and there's a working Admin
+Panel for team management. What's left:
 
 - **File storage**: the `documents` storage bucket + RLS policies are already
   in `supabase/schema.sql` — add an upload handler using
   `supabase.storage.from('documents').upload(...)` (the Documents tab is
   currently local-only)
-- **Task board real-time**: `messages` already broadcasts live (see
-  `WorkspaceChat` in `components/IdeaFlowApp.jsx`) — the Kanban board doesn't
-  yet, so two people moving cards at once won't see each other's moves
-  without a refresh. Same `postgres_changes` pattern, applied to `tasks`.
-- **Notifications**: the `notifications` table exists — add a route that
-  fans out a row to every workspace member on key events (idea approved,
-  task assigned, etc.), and a bell-icon UI that reads from it instead of the
-  current hardcoded demo list
+- **Notification fan-out**: notifications currently target one person per
+  event (idea creator, task assignee). Extend to notify *all* workspace
+  members on major events (e.g. milestone completed) if you want that.
+- **Mentions**: the PRD calls out "@mention" support in comments/chat — not
+  wired up yet
 
 ## Tech stack
 

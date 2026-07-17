@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
 // POST /api/ideas/:id/vote  { choice: "approve" | "reject" | "neutral" }
@@ -23,6 +23,12 @@ export async function POST(
     return NextResponse.json({ error: "Invalid choice" }, { status: 400 });
   }
 
+  const { data: before } = await supabase
+    .from("ideas")
+    .select("status, created_by")
+    .eq("id", params.id)
+    .single();
+
   const { data, error } = await supabase
     .from("idea_votes")
     .upsert(
@@ -41,6 +47,17 @@ export async function POST(
     .select("id, title, status")
     .eq("id", params.id)
     .single();
+
+  // Notify the idea's creator the moment it newly crosses into Approved.
+  if (before && before.status !== "approved" && idea?.status === "approved" && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const admin = createServiceClient();
+    await admin.from("notifications").insert({
+      user_id: before.created_by,
+      type: "idea_approved",
+      body: `Your idea "${idea.title}" was approved! A workspace has been created.`,
+      link: `/`,
+    });
+  }
 
   return NextResponse.json({ vote: data, idea });
 }

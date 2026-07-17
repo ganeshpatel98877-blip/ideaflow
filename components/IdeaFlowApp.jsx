@@ -190,7 +190,7 @@ function Sidebar({ tab, setTab, theme, onToggleTheme, currentUser, onSignOut }) 
   );
 }
 
-function Topbar({ title, onNewIdea, ideas = [], workspaceData = {}, onGoToIdea, onGoToWorkspace, notifications = [] }) {
+function Topbar({ title, onNewIdea, ideas = [], workspaceData = {}, onGoToIdea, onGoToWorkspace, notifications = [], onOpenNotifications }) {
   const [query, setQuery] = useState("");
   const [showNotif, setShowNotif] = useState(false);
   const wrapRef = useRef(null);
@@ -273,15 +273,24 @@ function Topbar({ title, onNewIdea, ideas = [], workspaceData = {}, onGoToIdea, 
         </div>
 
         <div className="if-notif-wrap">
-          <button className="if-icon-btn" onClick={() => setShowNotif((s) => !s)}>
+          <button
+            className="if-icon-btn"
+            onClick={() => {
+              setShowNotif((s) => {
+                const next = !s;
+                if (next && onOpenNotifications) onOpenNotifications();
+                return next;
+              });
+            }}
+          >
             <Bell size={16} />
-            {notifications.length > 0 && <span className="if-notif-dot" />}
+            {notifications.some((n) => n.read !== true) && <span className="if-notif-dot" />}
           </button>
           {showNotif && (
             <div className="if-notif-dropdown">
               <div className="if-search-group-label" style={{ padding: "10px 12px 4px" }}>Notifications</div>
               {notifications.map((n, i) => (
-                <div className="if-notif-row" key={i}>
+                <div className={"if-notif-row" + (n.read === false ? " unread" : "")} key={n.id ?? i}>
                   <div className="if-feed-icon"><n.icon size={13} /></div>
                   <div className="if-feed-text">{n.text}</div>
                 </div>
@@ -315,7 +324,7 @@ function StatCard({ label, value, icon: Icon, tint }) {
   );
 }
 
-function Dashboard({ ideas, setTab, workspaceData, onGoToIdea, onGoToWorkspace, notifications }) {
+function Dashboard({ ideas, setTab, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications }) {
   const approved = ideas.filter((i) => i.status === "Approved").length;
   const discussion = ideas.filter((i) => i.status === "Discussion").length;
   const feed = [
@@ -326,7 +335,7 @@ function Dashboard({ ideas, setTab, workspaceData, onGoToIdea, onGoToWorkspace, 
   ];
   return (
     <div>
-      <Topbar title="Dashboard" ideas={ideas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} />
+      <Topbar title="Dashboard" ideas={ideas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} onOpenNotifications={onOpenNotifications} />
       <div className="if-content">
         <div className="if-stat-grid">
           <StatCard label="Total Ideas" value={ideas.length} icon={Lightbulb} tint="rgba(124,111,255,0.16)" />
@@ -553,7 +562,7 @@ function AICoFounder({ idea }) {
   );
 }
 
-function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications }) {
+function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications }) {
   const [comment, setComment] = useState("");
   const [comments, setComments] = useState(idea.comments || []);
 
@@ -578,7 +587,7 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
 
   return (
     <div>
-      <Topbar title={idea.title} ideas={allIdeas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} />
+      <Topbar title={idea.title} ideas={allIdeas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} onOpenNotifications={onOpenNotifications} />
       <div className="if-content">
         <button className="if-back-btn" onClick={onBack}>&larr; Back to ideas</button>
 
@@ -649,11 +658,11 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
   );
 }
 
-function Workspaces({ ideas, workspaceData, onOpen, onGoToIdea, notifications }) {
+function Workspaces({ ideas, workspaceData, onOpen, onGoToIdea, notifications, onOpenNotifications }) {
   const approved = ideas.filter((i) => i.status === "Approved");
   return (
     <div>
-      <Topbar title="Workspaces" ideas={ideas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onOpen} notifications={notifications} />
+      <Topbar title="Workspaces" ideas={ideas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onOpen} notifications={notifications} onOpenNotifications={onOpenNotifications} />
       <div className="if-content">
         {approved.length === 0 && (
           <div className="if-panel">
@@ -721,10 +730,48 @@ function TaskCard({ task, onMove, onDragStart, onDragEnd, isDragging }) {
   );
 }
 
-function KanbanBoard({ tasks, onMove, onAdd }) {
+function KanbanBoard({ tasks, onMove, onAdd, workspaceId, isLive }) {
   const [newTitle, setNewTitle] = useState("");
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
+  const [liveTasks, setLiveTasks] = useState(tasks);
+  const supabaseRef = useRef(typeof window !== "undefined" ? createClient() : null);
+
+  useEffect(() => { setLiveTasks(tasks); }, [tasks]);
+
+  // Real-time: reflect task moves/adds from other team members instantly.
+  useEffect(() => {
+    if (!isLive || !workspaceId || !supabaseRef.current) return;
+    const channel = supabaseRef.current
+      .channel(`workspace-tasks-${workspaceId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks", filter: `workspace_id=eq.${workspaceId}` },
+        (payload) => {
+          setLiveTasks((prev) => {
+            if (payload.eventType === "DELETE") {
+              return prev.filter((t) => t.id !== payload.old.id);
+            }
+            const row = payload.new;
+            const mapped = {
+              id: row.id,
+              title: row.title,
+              priority: dbPriorityToUi[row.priority] || "Medium",
+              status: dbStatusToUi[row.status] || "To Do",
+            };
+            const existing = prev.find((t) => t.id === row.id);
+            if (existing) {
+              // Preserve the assignee name we already resolved locally —
+              // the raw Realtime payload only has assignee_id, not the joined name.
+              return prev.map((t) => (t.id === row.id ? { ...mapped, assignee: t.assignee } : t));
+            }
+            return [...prev, { ...mapped, assignee: "Team" }];
+          });
+        }
+      )
+      .subscribe();
+    return () => { supabaseRef.current.removeChannel(channel); };
+  }, [isLive, workspaceId]);
 
   const handleDrop = (col) => {
     if (draggingId != null) onMove(draggingId, col);
@@ -749,7 +796,7 @@ function KanbanBoard({ tasks, onMove, onAdd }) {
       </div>
       <div className="if-kanban">
         {TASK_COLUMNS.map((col) => {
-          const colTasks = tasks.filter((t) => t.status === col);
+          const colTasks = liveTasks.filter((t) => t.status === col);
           return (
             <div
               className={"if-kanban-col" + (dragOverCol === col ? " drag-over" : "")}
@@ -897,7 +944,7 @@ function DocumentsPanel({ documents, onUpload }) {
   );
 }
 
-function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessage, onUploadDoc, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, currentUser, isLive }) {
+function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessage, onUploadDoc, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications, currentUser, isLive }) {
   const [tab, setTab] = useState("board");
   const milestones = [
     { name: "Idea Approved", done: true },
@@ -909,7 +956,7 @@ function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessag
   ];
   return (
     <div>
-      <Topbar title={idea.title + " — Workspace"} ideas={allIdeas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} />
+      <Topbar title={idea.title + " — Workspace"} ideas={allIdeas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} onOpenNotifications={onOpenNotifications} />
       <div className="if-content">
         <button className="if-back-btn" onClick={onBack}>&larr; Back to workspaces</button>
         <div className="if-ws-tabs">
@@ -919,7 +966,7 @@ function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessag
         </div>
 
         {tab === "board" && (
-          <KanbanBoard tasks={ws.tasks} onMove={onMoveTask} onAdd={onAddTask} />
+          <KanbanBoard tasks={ws.tasks} onMove={onMoveTask} onAdd={onAddTask} workspaceId={ws.workspaceId} isLive={isLive} />
         )}
         {tab === "discussion" && (
           <WorkspaceChat messages={ws.messages} onSend={onSendMessage} workspaceId={ws.workspaceId} currentUser={currentUser} isLive={isLive} />
@@ -947,7 +994,7 @@ function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessag
 
 const CHART_COLORS = ["#7C6FFF", "#3AC98C", "#F5A623", "#EF5B6B", "#4B9BFF"];
 
-function AnalyticsPage({ ideas, workspaceData, onGoToIdea, onGoToWorkspace, notifications }) {
+function AnalyticsPage({ ideas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications }) {
   const memberVotes = [
     { name: "Priya Shah", votes: 21, tasks: 14 },
     { name: "Ganesh Rao", votes: 18, tasks: 11 },
@@ -966,7 +1013,7 @@ function AnalyticsPage({ ideas, workspaceData, onGoToIdea, onGoToWorkspace, noti
 
   return (
     <div>
-      <Topbar title="Analytics" ideas={ideas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} />
+      <Topbar title="Analytics" ideas={ideas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} onOpenNotifications={onOpenNotifications} />
       <div className="if-content">
         <div className="if-two-col">
           <div className="if-panel">
@@ -1037,12 +1084,60 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
   const selectedIdea = ideas.find((i) => i.id === selectedId);
   const selectedWorkspaceIdea = ideas.find((i) => i.id === selectedWorkspaceId);
 
-  const notifications = [
+  const demoNotifications = [
     { icon: Lightbulb, text: "Aman Verma created a new idea — AI Resume Builder." },
     { icon: ThumbsUp, text: "Priya Shah voted Approve on Campus Marketplace." },
     { icon: FolderKanban, text: "Workspace created for Campus Marketplace." },
     { icon: CheckCircle2, text: "Task \u201cDefine MVP feature set\u201d completed." },
   ];
+
+  const notifIcon = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban };
+  const [liveNotifications, setLiveNotifications] = useState(null);
+
+  useEffect(() => {
+    if (!isLive) return;
+    let ignore = false;
+    fetch("/api/notifications")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((rows) => {
+        if (ignore) return;
+        setLiveNotifications(rows.map((n) => ({ id: n.id, icon: notifIcon[n.type] || Bell, text: n.body, read: n.read })));
+      })
+      .catch(() => { if (!ignore) setLiveNotifications([]); });
+    return () => { ignore = true; };
+  }, [isLive]);
+
+  // Live badge/dropdown updates the moment a new notification row is
+  // inserted for this user (idea approved, comment received, task assigned).
+  useEffect(() => {
+    if (!isLive || !supabase || !currentUser) return;
+    const channel = supabase
+      .channel(`notifications-${currentUser.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${currentUser.id}` },
+        (payload) => {
+          setLiveNotifications((prev) => [
+            { id: payload.new.id, icon: notifIcon[payload.new.type] || Bell, text: payload.new.body, read: false },
+            ...(prev || []),
+          ]);
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [isLive, currentUser]);
+
+  const notifications = isLive ? (liveNotifications ?? []) : demoNotifications;
+
+  const onOpenNotifications = () => {
+    if (!isLive) return;
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }).catch(() => {});
+    setLiveNotifications((prev) => (prev ? prev.map((n) => ({ ...n, read: true })) : prev));
+  };
 
   const ensureWorkspace = (id) =>
     workspaceData[id] || { tasks: [], messages: [] };
@@ -1381,6 +1476,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
         .if-notif-dot { position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%; background:var(--reject); border:1.5px solid var(--panel); }
         .if-notif-dropdown { position:absolute; top:calc(100% + 8px); right:0; width:300px; background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,0.4); z-index:40; padding:4px 0 8px; max-height:360px; overflow-y:auto; }
         .if-notif-row { display:flex; align-items:center; gap:10px; padding:9px 14px; }
+        .if-notif-row.unread { background:var(--accent-soft); }
         .if-notif-row:hover { background:var(--hover); }
         .if-search input { background:transparent; border:none; outline:none; color:var(--text); font-size:12.5px; width:100%; font-family:inherit; }
         .if-icon-btn { width:32px; height:32px; border-radius:8px; background:var(--panel); border:1px solid var(--panel-border); color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; }
@@ -1590,18 +1686,19 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
             onGoToIdea={(id) => { setSelectedWorkspaceId(null); setSelectedId(id); }}
             onGoToWorkspace={setSelectedWorkspaceId}
             notifications={notifications}
+            onOpenNotifications={onOpenNotifications}
             currentUser={currentUser}
             isLive={isLive}
           />
         ) : tab === "dashboard" ? (
-          <Dashboard ideas={ideas} setTab={setTab} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} />
+          <Dashboard ideas={ideas} setTab={setTab} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} onOpenNotifications={onOpenNotifications} />
         ) : tab === "workspaces" ? (
-          <Workspaces ideas={ideas} workspaceData={workspaceData} onOpen={setSelectedWorkspaceId} onGoToIdea={setSelectedId} notifications={notifications} />
+          <Workspaces ideas={ideas} workspaceData={workspaceData} onOpen={setSelectedWorkspaceId} onGoToIdea={setSelectedId} notifications={notifications} onOpenNotifications={onOpenNotifications} />
         ) : tab === "analytics" ? (
-          <AnalyticsPage ideas={ideas} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} />
+          <AnalyticsPage ideas={ideas} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} onOpenNotifications={onOpenNotifications} />
         ) : (
           <div>
-            <Topbar title="Ideas" onNewIdea={() => setShowNew(true)} ideas={ideas} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} />
+            <Topbar title="Ideas" onNewIdea={() => setShowNew(true)} ideas={ideas} workspaceData={workspaceData} onGoToIdea={setSelectedId} onGoToWorkspace={setSelectedWorkspaceId} notifications={notifications} onOpenNotifications={onOpenNotifications} />
             <div className="if-content">
               <div className="if-idea-grid">
                 {ideas.map((idea) => (

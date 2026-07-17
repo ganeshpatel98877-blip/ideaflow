@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
 // GET /api/workspaces/:id/tasks
@@ -31,12 +31,14 @@ export async function POST(
   const body = await req.json();
   if (!body?.title) return NextResponse.json({ error: "title is required" }, { status: 400 });
 
+  const assigneeId = body.assignee_id ?? user.id;
+
   const { data, error } = await supabase
     .from("tasks")
     .insert({
       workspace_id: params.id,
       title: body.title,
-      assignee_id: body.assignee_id ?? user.id,
+      assignee_id: assigneeId,
       priority: body.priority ?? "medium",
       status: body.status ?? "todo",
     })
@@ -44,6 +46,18 @@ export async function POST(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Notify the assignee, unless they assigned it to themselves.
+  if (assigneeId !== user.id && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const admin = createServiceClient();
+    await admin.from("notifications").insert({
+      user_id: assigneeId,
+      type: "task_assigned",
+      body: `You were assigned a new task: "${body.title}"`,
+      link: `/`,
+    });
+  }
+
   return NextResponse.json(data, { status: 201 });
 }
 

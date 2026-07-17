@@ -351,9 +351,11 @@ create policy "users can mark their own notifications read"
   on notifications for update using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
--- Realtime — required for the live workspace chat to receive new messages
+-- Realtime — required for live workspace chat and the live Kanban board
 -- ---------------------------------------------------------------------------
 alter publication supabase_realtime add table messages;
+alter publication supabase_realtime add table tasks;
+alter publication supabase_realtime add table notifications;
 
 -- ---------------------------------------------------------------------------
 -- Storage bucket for documents (run once)

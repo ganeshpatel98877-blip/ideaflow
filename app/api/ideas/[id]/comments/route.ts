@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
 // GET /api/ideas/:id/comments
@@ -38,5 +38,22 @@ export async function POST(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Notify the idea's creator that someone commented (skip if they're
+  // commenting on their own idea).
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { data: idea } = await supabase.from("ideas").select("title, created_by").eq("id", params.id).single();
+    if (idea && idea.created_by !== user.id) {
+      const admin = createServiceClient();
+      const authorName = data.profiles?.full_name || "Someone";
+      await admin.from("notifications").insert({
+        user_id: idea.created_by,
+        type: "comment_added",
+        body: `${authorName} commented on "${idea.title}"`,
+        link: `/`,
+      });
+    }
+  }
+
   return NextResponse.json(data, { status: 201 });
 }
