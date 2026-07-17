@@ -1,6 +1,12 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import type { Database } from "./types";
+
+// NOTE: intentionally not passing the <Database> generic here. Our
+// lib/supabase/types.ts is hand-written (not generated from the live
+// project), and on this @supabase/supabase-js version that causes
+// `.select(...).single()` to infer as `never` in several routes. Regenerate
+// real types with `npx supabase gen types typescript --project-id <ref>`
+// and re-add `createServerClient<Database>` once you do.
 
 // Use inside Server Components, Route Handlers, and Server Actions.
 // Reads/writes the user's session via cookies so RLS policies apply
@@ -8,7 +14,7 @@ import type { Database } from "./types";
 export function createClient() {
   const cookieStore = cookies();
 
-  return createServerClient<Database>(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -41,7 +47,7 @@ export function createClient() {
 // a client component.
 export function createServiceClient() {
   const { createClient: createSupabaseClient } = require("@supabase/supabase-js");
-  return createSupabaseClient<Database>(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }

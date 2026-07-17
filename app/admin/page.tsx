@@ -11,11 +11,13 @@ export default async function AdminPage() {
 
   if (!user) redirect("/login");
 
-  const { data: myProfile } = await supabase
+  const { data: myProfileRaw } = await supabase
     .from("profiles")
     .select("id, full_name, role")
     .eq("id", user.id)
     .single();
+
+  const myProfile = myProfileRaw as { id: string; full_name: string; role: string } | null;
 
   if (!myProfile || !["owner", "admin"].includes(myProfile.role)) {
     redirect("/");

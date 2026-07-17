@@ -117,7 +117,7 @@ function LoginForm() {
           <form onSubmit={verifyCode} style={styles.form}>
             <p style={styles.sentText}>
               We sent a 6-digit code to <strong>{email}</strong>. Enter it
-              below — don't click the link in the email, just use the code.
+              below — don&apos;t click the link in the email, just use the code.
             </p>
             <div style={styles.inputWrap}>
               <input

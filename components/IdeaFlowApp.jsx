@@ -237,7 +237,7 @@ function Topbar({ title, onNewIdea, ideas = [], workspaceData = {}, onGoToIdea, 
           </div>
           {q.length > 0 && (
             <div className="if-search-dropdown">
-              {!hasResults && <div className="if-search-empty">No results for "{query}"</div>}
+              {!hasResults && <div className="if-search-empty">No results for &quot;{query}&quot;</div>}
               {results.ideas.length > 0 && (
                 <div className="if-search-group">
                   <div className="if-search-group-label">Ideas</div>
@@ -295,7 +295,7 @@ function Topbar({ title, onNewIdea, ideas = [], workspaceData = {}, onGoToIdea, 
                   <div className="if-feed-text">{n.text}</div>
                 </div>
               ))}
-              {notifications.length === 0 && <div className="if-search-empty">You're all caught up.</div>}
+              {notifications.length === 0 && <div className="if-search-empty">You&apos;re all caught up.</div>}
             </div>
           )}
         </div>

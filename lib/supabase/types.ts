@@ -199,5 +199,14 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["notifications"]["Row"]>;
       };
     };
+    Views: {};
+    Functions: {};
+    Enums: {
+      user_role: UserRole;
+      idea_status: IdeaStatus;
+      vote_choice: VoteChoice;
+      task_status: TaskStatus;
+      task_priority: TaskPriority;
+    };
   };
 }
