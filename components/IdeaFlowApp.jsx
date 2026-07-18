@@ -909,17 +909,96 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
   );
 }
 
-function DocumentsPanel({ documents, onUpload }) {
+function DocumentsPanel({ documents, onUpload, workspaceId, isLive, onLocalDocAdded }) {
   const [folder, setFolder] = useState("All");
+  const [uploadFolder, setUploadFolder] = useState(DOC_FOLDERS[0]);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState(null);
+  const fileInputRef = useRef(null);
+  const supabaseRef = useRef(typeof window !== "undefined" ? createClient() : null);
+
   const filtered = folder === "All" ? documents : documents.filter((d) => d.folder === folder);
+
+  const triggerPicker = () => {
+    if (!isLive) { onUpload(); return; }
+    fileInputRef.current?.click();
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !workspaceId || !supabaseRef.current) return;
+
+    setUploading(true);
+    setError(null);
+    try {
+      const {
+        data: { user },
+      } = await supabaseRef.current.auth.getUser();
+      const path = `${workspaceId}/${Date.now()}-${file.name}`;
+
+      const { error: uploadError } = await supabaseRef.current.storage
+        .from("documents")
+        .upload(path, file, { upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: row, error: insertError } = await supabaseRef.current
+        .from("documents")
+        .insert({
+          workspace_id: workspaceId,
+          name: file.name,
+          folder: uploadFolder,
+          storage_path: path,
+          size_bytes: file.size,
+          uploaded_by: user?.id,
+        })
+        .select("*, profiles(full_name)")
+        .single();
+      if (insertError) throw insertError;
+
+      onLocalDocAdded({
+        id: row.id,
+        name: row.name,
+        folder: row.folder,
+        uploadedBy: row.profiles?.full_name || "You",
+        size: `${(row.size_bytes / 1024 / 1024).toFixed(2)} MB`,
+        version: row.version,
+        storagePath: row.storage_path,
+      });
+    } catch (err) {
+      setError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const download = async (doc) => {
+    if (!isLive || !doc.storagePath || !supabaseRef.current) return;
+    const { data, error: signError } = await supabaseRef.current.storage
+      .from("documents")
+      .createSignedUrl(doc.storagePath, 3600);
+    if (signError) { alert(signError.message); return; }
+    window.open(data.signedUrl, "_blank");
+  };
+
   return (
     <div className="if-panel">
       <div className="if-panel-header">
         <h3>Documents</h3>
-        <button className="if-btn-primary sm" onClick={onUpload}>
-          <Upload size={13} /> Upload
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {isLive && (
+            <select value={uploadFolder} onChange={(e) => setUploadFolder(e.target.value)} className="if-doc-folder-select">
+              {DOC_FOLDERS.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          )}
+          <button className="if-btn-primary sm" onClick={triggerPicker} disabled={uploading}>
+            {uploading ? <Loader2 size={13} className="if-spin" /> : <Upload size={13} />}
+            {uploading ? "Uploading..." : "Upload"}
+          </button>
+        </div>
+        <input ref={fileInputRef} type="file" onChange={handleFile} style={{ display: "none" }} />
       </div>
+      {error && <div className="if-ai-error" style={{ marginBottom: 10 }}>{error}</div>}
       <div className="if-doc-folders">
         {["All", ...DOC_FOLDERS].map((f) => (
           <button key={f} className={"if-folder-chip" + (folder === f ? " active" : "")} onClick={() => setFolder(f)}>
@@ -935,7 +1014,7 @@ function DocumentsPanel({ documents, onUpload }) {
               <div className="if-doc-name">{d.name}</div>
               <div className="if-doc-meta">{d.folder} &middot; {d.size} &middot; v{d.version} &middot; uploaded by {d.uploadedBy}</div>
             </div>
-            <button className="if-icon-btn"><Download size={14} /></button>
+            <button className="if-icon-btn" onClick={() => download(d)}><Download size={14} /></button>
           </div>
         ))}
         {filtered.length === 0 && <p className="if-ai-empty">No documents in this folder yet.</p>}
@@ -972,7 +1051,7 @@ function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessag
           <WorkspaceChat messages={ws.messages} onSend={onSendMessage} workspaceId={ws.workspaceId} currentUser={currentUser} isLive={isLive} />
         )}
         {tab === "documents" && (
-          <DocumentsPanel documents={ws.documents || []} onUpload={onUploadDoc} />
+          <DocumentsPanel documents={ws.documents || []} onUpload={onUploadDoc} workspaceId={ws.workspaceId} isLive={isLive} onLocalDocAdded={(doc) => onUploadDoc(doc)} />
         )}
         {tab === "milestones" && (
           <div className="if-panel">
@@ -1166,6 +1245,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
               uploadedBy: d.profiles?.full_name || "Someone",
               size: d.size_bytes ? `${(d.size_bytes / 1024 / 1024).toFixed(1)} MB` : "—",
               version: d.version,
+              storagePath: d.storage_path,
             })),
           },
         }));
@@ -1267,11 +1347,16 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
     });
   };
 
-  const uploadDoc = (workspaceId) => {
-    // Document storage upload isn't wired up yet (see README) — stays local-only for now.
+  const uploadDoc = (workspaceId, realDoc) => {
     setWorkspaceData((prev) => {
       const ws = prev[workspaceId] || { tasks: [], messages: [], documents: [] };
       const docs = ws.documents || [];
+
+      if (realDoc) {
+        return { ...prev, [workspaceId]: { ...ws, documents: [...docs, realDoc] } };
+      }
+
+      // Offline/demo mode — no real Storage wired up, so fake a placeholder doc.
       const nextId = docs.length ? Math.max(...docs.map((d) => d.id)) + 1 : 1;
       const newDoc = {
         id: nextId,
@@ -1616,6 +1701,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
         .if-doc-info { flex:1; min-width:0; }
         .if-doc-name { font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .if-doc-meta { font-size:11px; color:var(--muted); }
+        .if-doc-folder-select { background:var(--sunken); border:1px solid var(--panel-border); border-radius:8px; padding:7px 10px; color:var(--text); font-size:12px; font-family:inherit; }
 
         @media (max-width: 860px) {
           .if-two-col { grid-template-columns:1fr; }
@@ -1680,7 +1766,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
             onMoveTask={(taskId, status) => moveTask(selectedWorkspaceIdea.id, taskId, status)}
             onAddTask={(title) => addTask(selectedWorkspaceIdea.id, title)}
             onSendMessage={(text) => sendMessage(selectedWorkspaceIdea.id, text)}
-            onUploadDoc={() => uploadDoc(selectedWorkspaceIdea.id)}
+            onUploadDoc={(realDoc) => uploadDoc(selectedWorkspaceIdea.id, realDoc)}
             allIdeas={ideas}
             workspaceData={workspaceData}
             onGoToIdea={(id) => { setSelectedWorkspaceId(null); setSelectedId(id); }}
