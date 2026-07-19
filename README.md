@@ -187,4 +187,4 @@ rest), and there's a working Admin Panel for team management. What's left:
 ## Tech stack
 
 Next.js 14 (App Router) · TypeScript · React 18 · Recharts · Lucide Icons ·
-Gemini API (`gemini-2.5-flash`)
+Gemini API (`gemini-3.5-flash`)
