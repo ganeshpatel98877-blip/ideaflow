@@ -495,17 +495,20 @@ function AICoFounder({ idea }) {
     setResult(null);
     try {
       // Calls our own server route (app/api/ai-cofounder/route.ts), which holds
-      // the ANTHROPIC_API_KEY server-side and forwards the request to Claude.
+      // the GEMINI_API_KEY server-side and forwards the request to Gemini.
       const response = await fetch("/api/ai-cofounder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idea }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Request failed");
+      if (!response.ok) {
+        const detail = typeof data.detail === "string" ? data.detail.slice(0, 300) : "";
+        throw new Error([data.error, detail].filter(Boolean).join(" — ") || "Request failed");
+      }
       setResult(data);
     } catch (e) {
-      setError("AI Co-Founder could not respond right now. Please try again.");
+      setError(e.message || "AI Co-Founder could not respond right now. Please try again.");
     } finally {
       setLoading(false);
     }
