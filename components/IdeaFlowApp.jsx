@@ -1023,16 +1023,18 @@ function DocumentsPanel({ documents, onUpload, workspaceId, isLive, onLocalDocAd
   );
 }
 
-function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessage, onUploadDoc, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications, currentUser, isLive }) {
+function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessage, onUploadDoc, onToggleMilestone, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications, currentUser, isLive }) {
   const [tab, setTab] = useState("board");
-  const milestones = [
-    { name: "Idea Approved", done: true },
-    { name: "MVP Completed", done: false },
-    { name: "Beta Released", done: false },
-    { name: "First Customer", done: false },
-    { name: "Funding Raised", done: false },
-    { name: "Public Launch", done: false },
+  const demoMilestones = [
+    { id: "demo-1", name: "Idea Approved", completed: true },
+    { id: "demo-2", name: "MVP Completed", completed: false },
+    { id: "demo-3", name: "Beta Released", completed: false },
+    { id: "demo-4", name: "First Customer", completed: false },
+    { id: "demo-5", name: "Funding Raised", completed: false },
+    { id: "demo-6", name: "Public Launch", completed: false },
   ];
+  const milestones = isLive ? (ws.milestones && ws.milestones.length ? ws.milestones : demoMilestones) : demoMilestones;
+
   return (
     <div>
       <Topbar title={idea.title + " — Workspace"} ideas={allIdeas} workspaceData={workspaceData} onGoToIdea={onGoToIdea} onGoToWorkspace={onGoToWorkspace} notifications={notifications} onOpenNotifications={onOpenNotifications} />
@@ -1057,12 +1059,19 @@ function WorkspaceDetail({ idea, ws, onBack, onMoveTask, onAddTask, onSendMessag
           <div className="if-panel">
             <div className="if-panel-header"><h3>Milestones</h3></div>
             <div className="if-milestones">
-              {milestones.map((m, i) => (
-                <div className="if-milestone-row" key={i}>
-                  {m.done ? <CheckCircle size={16} color="var(--approve)" /> : <Circle size={16} color="var(--muted)" />}
-                  <span style={{ color: m.done ? "var(--text)" : "var(--muted)" }}>{m.name}</span>
-                </div>
-              ))}
+              {milestones.map((m) => {
+                const canToggle = isLive && ws.workspaceId && !String(m.id).startsWith("demo-");
+                return (
+                  <div
+                    className={"if-milestone-row" + (canToggle ? " clickable" : "")}
+                    key={m.id}
+                    onClick={() => canToggle && onToggleMilestone(ws.workspaceId, m.id, !m.completed)}
+                  >
+                    {m.completed ? <CheckCircle size={16} color="var(--approve)" /> : <Circle size={16} color="var(--muted)" />}
+                    <span style={{ color: m.completed ? "var(--text)" : "var(--muted)" }}>{m.name}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1170,7 +1179,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
     { icon: CheckCircle2, text: "Task \u201cDefine MVP feature set\u201d completed." },
   ];
 
-  const notifIcon = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban };
+  const notifIcon = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban, milestone_completed: Trophy };
   const [liveNotifications, setLiveNotifications] = useState(null);
 
   useEffect(() => {
@@ -1246,6 +1255,12 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
               size: d.size_bytes ? `${(d.size_bytes / 1024 / 1024).toFixed(1)} MB` : "—",
               version: d.version,
               storagePath: d.storage_path,
+            })),
+            milestones: (data.milestones || []).map((m) => ({
+              id: m.id,
+              name: m.name,
+              completed: m.completed,
+              sortOrder: m.sort_order,
             })),
           },
         }));
@@ -1368,6 +1383,37 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
       };
       return { ...prev, [workspaceId]: { ...ws, documents: [...docs, newDoc] } };
     });
+  };
+
+  const toggleMilestone = (realWorkspaceId, milestoneId, completed) => {
+    // workspaceData is keyed by idea id, but the API needs the real
+    // workspace UUID — find the matching idea-key entry to update locally.
+    const ideaKey = Object.keys(workspaceData).find(
+      (k) => workspaceData[k]?.workspaceId === realWorkspaceId
+    );
+
+    fetch(`/api/workspaces/${realWorkspaceId}/milestones`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ milestoneId, completed }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(() => {
+        if (!ideaKey) return;
+        setWorkspaceData((prev) => {
+          const ws = prev[ideaKey];
+          return {
+            ...prev,
+            [ideaKey]: {
+              ...ws,
+              milestones: (ws.milestones || []).map((m) =>
+                m.id === milestoneId ? { ...m, completed } : m
+              ),
+            },
+          };
+        });
+      })
+      .catch(() => {});
   };
 
   const vote = (id, kind) => {
@@ -1691,6 +1737,8 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
 
         .if-milestones { display:flex; flex-direction:column; gap:12px; }
         .if-milestone-row { display:flex; align-items:center; gap:10px; font-size:13px; }
+        .if-milestone-row.clickable { cursor:pointer; padding:4px 6px; margin:-4px -6px; border-radius:6px; }
+        .if-milestone-row.clickable:hover { background:var(--sunken); }
 
         .if-doc-folders { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
         .if-folder-chip { background:var(--sunken); border:1px solid var(--panel-border); color:var(--muted); font-size:11.5px; padding:5px 10px; border-radius:7px; cursor:pointer; font-family:inherit; }
@@ -1767,6 +1815,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
             onAddTask={(title) => addTask(selectedWorkspaceIdea.id, title)}
             onSendMessage={(text) => sendMessage(selectedWorkspaceIdea.id, text)}
             onUploadDoc={(realDoc) => uploadDoc(selectedWorkspaceIdea.id, realDoc)}
+            onToggleMilestone={toggleMilestone}
             allIdeas={ideas}
             workspaceData={workspaceData}
             onGoToIdea={(id) => { setSelectedWorkspaceId(null); setSelectedId(id); }}
