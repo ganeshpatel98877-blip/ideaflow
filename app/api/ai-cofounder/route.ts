@@ -45,6 +45,7 @@ Category: ${idea.category}`;
           generationConfig: {
             responseMimeType: "application/json",
             maxOutputTokens: 3000,
+            thinkingConfig: { thinkingLevel: "low" },
           },
         }),
       }
