@@ -11,7 +11,8 @@ This repo is a working Next.js prototype of the product described in `PRD.md`.
 - **Ideas** — create, vote (75% approval rule), discuss, AI Co-Founder analysis
 - **Workspaces** — auto-created on approval: Kanban task board (drag & drop),
   real-time WhatsApp-style team chat, document library (real Supabase
-  Storage uploads/downloads), milestone tracker
+  Storage uploads/downloads), milestone tracker (click to mark complete,
+  notifies the whole team)
 - **Admin Panel** (`/admin`, Owners/Admins only) — view all team members,
   change roles, invite new teammates by email, see all workspaces
 - **Analytics** — member activity, idea status mix, task completion charts
@@ -173,17 +174,15 @@ Supabase → Authentication → URL Configuration.
 ## Next steps (to go from prototype to production)
 
 The UI is now fully wired to Supabase — ideas, votes, comments, workspace
-tasks, workspace chat, and document uploads all read and write real data
-(with the offline seed demo as a fallback when the database is empty).
-Workspace chat and the Kanban board are both real-time (Supabase Realtime),
-real notifications fire on idea approval / comments / task assignment, and
-there's a working Admin Panel for team management. What's left:
+tasks, workspace chat, document uploads, and milestones all read and write
+real data (with the offline seed demo as a fallback when the database is
+empty). Workspace chat and the Kanban board are both real-time (Supabase
+Realtime), real notifications fire on idea approval / comments / task
+assignment / milestone completion (team-wide for milestones, 1:1 for the
+rest), and there's a working Admin Panel for team management. What's left:
 
 - **Mentions**: the PRD calls out "@mention" support in comments/chat — not
   wired up yet
-- **Notification fan-out**: notifications currently target one person per
-  event (idea creator, task assignee). Extend to notify *all* workspace
-  members on major events (e.g. milestone completed) if you want that.
 
 ## Tech stack
 
