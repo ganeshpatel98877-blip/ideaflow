@@ -44,7 +44,7 @@ Category: ${idea.category}`;
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
             responseMimeType: "application/json",
-            maxOutputTokens: 1000,
+            maxOutputTokens: 3000,
           },
         }),
       }
@@ -59,9 +59,22 @@ Category: ${idea.category}`;
     }
 
     const data = await response.json();
+    const finishReason = data?.candidates?.[0]?.finishReason;
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const clean = raw.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch {
+      if (finishReason === "MAX_TOKENS") {
+        return NextResponse.json(
+          { error: "Gemini's response was cut off before finishing (ran out of output tokens). Try again — the token budget has been raised, but very long ideas can still occasionally hit it." },
+          { status: 502 }
+        );
+      }
+      throw new Error(`Gemini returned non-JSON output: ${clean.slice(0, 200)}`);
+    }
 
     return NextResponse.json(parsed);
   } catch (err: any) {
