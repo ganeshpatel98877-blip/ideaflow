@@ -18,7 +18,7 @@ This repo is a working Next.js prototype of the product described in `PRD.md`.
 - **Analytics** — member activity, idea status mix, task completion charts
 - **Global search + notifications**
 - **Light / dark theme toggle**
-- **AI Co-Founder** — real Gemini API call (market analysis, competitors, revenue
+- **AI Co-Founder** — real Groq (Llama 3.3 70B) API call (market analysis, competitors, revenue
   ideas, tech stack, risks, roadmap), proxied through a server route so your API
   key is never exposed to the browser
 
@@ -34,7 +34,7 @@ npm install
 # 2. Add your environment variables
 cp .env.example .env.local
 # then edit .env.local — see "Backend setup" below for Supabase, and
-# paste your Gemini key from https://aistudio.google.com/apikey
+# paste your Groq key from https://console.groq.com/keys
 
 # 3. Run the dev server
 npm run dev
@@ -120,7 +120,7 @@ ideaflow/
 │   ├── api/
 │   │   ├── admin/invite/route.ts        # POST — invite a teammate by email
 │   │   ├── admin/role/route.ts          # POST — change a member's role
-│   │   ├── ai-cofounder/route.ts        # Gemini API proxy (server-side key)
+│   │   ├── ai-cofounder/route.ts        # Groq API proxy (server-side key)
 │   │   ├── ideas/route.ts               # GET (list) / POST (create) ideas
 │   │   ├── ideas/[id]/vote/route.ts     # POST — cast/update a vote
 │   │   ├── ideas/[id]/comments/route.ts # GET/POST — idea discussion
@@ -165,7 +165,7 @@ committed.
 ## Deploying
 
 The easiest path is [Vercel](https://vercel.com/new) — import the GitHub repo,
-add `GEMINI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+add `GROQ_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
 and `SUPABASE_SERVICE_ROLE_KEY` under Project Settings → Environment
 Variables, and deploy. If you set up Google/GitHub OAuth, also add your
 production URL as an authorized redirect in both the provider console and
@@ -187,4 +187,4 @@ rest), and there's a working Admin Panel for team management. What's left:
 ## Tech stack
 
 Next.js 14 (App Router) · TypeScript · React 18 · Recharts · Lucide Icons ·
-Gemini API (`gemini-3.5-flash`)
+Groq API (`llama-3.3-70b-versatile`)

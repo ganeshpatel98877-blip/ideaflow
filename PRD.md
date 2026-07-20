@@ -121,7 +121,7 @@ modes, purposeful motion, data visualization, premium typography.
 | Authentication | Google OAuth, GitHub OAuth, Email/Password |
 | File Storage | Supabase Storage |
 | Real-Time | WebSockets (Supabase Realtime) |
-| AI Layer | Google Gemini API |
+| AI Layer | Groq API (Llama 3.3 70B, free tier) |
 
 ## 15. Future Roadmap
 
