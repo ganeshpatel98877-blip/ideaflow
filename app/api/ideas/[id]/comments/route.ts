@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { notifyMentions } from "@/lib/mentions";
 import { NextRequest, NextResponse } from "next/server";
 
 // GET /api/ideas/:id/comments
@@ -39,13 +40,14 @@ export async function POST(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Notify the idea's creator that someone commented (skip if they're
-  // commenting on their own idea).
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
     const { data: idea } = await supabase.from("ideas").select("title, created_by").eq("id", params.id).single();
+    const authorName = data.profiles?.full_name || "Someone";
+    const admin = createServiceClient();
+
+    // Notify the idea's creator that someone commented (skip if they're
+    // commenting on their own idea).
     if (idea && idea.created_by !== user.id) {
-      const admin = createServiceClient();
-      const authorName = data.profiles?.full_name || "Someone";
       await admin.from("notifications").insert({
         user_id: idea.created_by,
         type: "comment_added",
@@ -53,6 +55,16 @@ export async function POST(
         link: `/`,
       });
     }
+
+    // Separately notify anyone @mentioned in the comment body.
+    await notifyMentions({
+      admin,
+      body,
+      authorId: user.id,
+      authorName,
+      excludeUserIds: idea?.created_by ? [idea.created_by] : [],
+      notifBody: (name) => `${name} mentioned you in a comment on "${idea?.title}"`,
+    });
   }
 
   return NextResponse.json(data, { status: 201 });

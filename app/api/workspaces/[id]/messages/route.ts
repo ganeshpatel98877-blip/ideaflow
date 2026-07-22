@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { notifyMentions } from "@/lib/mentions";
 import { NextRequest, NextResponse } from "next/server";
 
 // GET /api/workspaces/:id/messages
@@ -38,5 +39,20 @@ export async function POST(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const admin = createServiceClient();
+    const authorName = data.profiles?.full_name || "Someone";
+    const { data: workspace } = await admin.from("workspaces").select("name").eq("id", params.id).single();
+
+    await notifyMentions({
+      admin,
+      body,
+      authorId: user.id,
+      authorName,
+      notifBody: (name) => `${name} mentioned you in ${workspace?.name || "a workspace"} chat`,
+    });
+  }
+
   return NextResponse.json(data, { status: 201 });
 }

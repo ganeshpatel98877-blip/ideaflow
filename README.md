@@ -173,16 +173,20 @@ Supabase → Authentication → URL Configuration.
 
 ## Next steps (to go from prototype to production)
 
-The UI is now fully wired to Supabase — ideas, votes, comments, workspace
-tasks, workspace chat, document uploads, and milestones all read and write
-real data (with the offline seed demo as a fallback when the database is
-empty). Workspace chat and the Kanban board are both real-time (Supabase
-Realtime), real notifications fire on idea approval / comments / task
-assignment / milestone completion (team-wide for milestones, 1:1 for the
-rest), and there's a working Admin Panel for team management. What's left:
+The core product loop is fully wired to Supabase and real-time — ideas,
+votes, comments (with @mentions), workspace tasks, workspace chat (with
+@mentions), document uploads, and milestones all read and write real data
+(with the offline seed demo as a fallback when the database is empty).
+Notifications fire on idea approval / comments / task assignment / mentions
+/ milestone completion (team-wide for milestones, 1:1 for the rest), and
+there's a working Admin Panel for team management. Everything called out in
+the original PRD is implemented. From here it's mostly refinement:
 
-- **Mentions**: the PRD calls out "@mention" support in comments/chat — not
-  wired up yet
+- Tighten up remaining ESLint warnings (a few missing `useEffect`
+  dependencies — non-blocking, build passes clean)
+- Consider regenerating real Supabase types (`npx supabase gen types
+  typescript`) to restore strict typing — see the note in
+  `lib/supabase/server.ts` for why it's currently loosely typed
 
 ## Tech stack
 

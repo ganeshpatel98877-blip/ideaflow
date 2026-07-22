@@ -60,6 +60,102 @@ const mapDbComment = (row) => ({
   text: row.body,
 });
 
+// --- @mentions -----------------------------------------------------------
+let _teamMembersCache = null;
+
+function useTeamMembers(isLive) {
+  const [members, setMembers] = useState(_teamMembersCache || []);
+  useEffect(() => {
+    if (!isLive) return;
+    if (_teamMembersCache) { setMembers(_teamMembersCache); return; }
+    const supabase = createClient();
+    supabase
+      .from("profiles")
+      .select("id, full_name")
+      .then(({ data }) => {
+        _teamMembersCache = data || [];
+        setMembers(_teamMembersCache);
+      });
+  }, [isLive]);
+  return members;
+}
+
+// Renders text with @Name mentions highlighted, matched against known team members.
+function renderWithMentions(text, members) {
+  if (!members || members.length === 0) return text;
+  const names = members.map((m) => m.full_name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (names.length === 0) return text;
+  const pattern = new RegExp("@(" + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "g");
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push(<span className="if-mention-tag" key={"m" + key++}>@{match[1]}</span>);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
+function MentionInput({ value, onChange, onKeyDown, placeholder, isLive }) {
+  const members = useTeamMembers(isLive);
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const inputRef = useRef(null);
+
+  const handleChange = (e) => {
+    onChange(e);
+    const val = e.target.value;
+    const cursor = e.target.selectionStart ?? val.length;
+    const beforeCursor = val.slice(0, cursor);
+    const match = beforeCursor.match(/@([a-zA-Z ]*)$/);
+    if (match && isLive) {
+      setMentionQuery(match[1].toLowerCase());
+      setShowMentions(true);
+    } else {
+      setShowMentions(false);
+    }
+  };
+
+  const insertMention = (name) => {
+    const el = inputRef.current;
+    const cursor = el ? el.selectionStart : value.length;
+    const before = value.slice(0, cursor).replace(/@([a-zA-Z ]*)$/, `@${name} `);
+    const after = value.slice(cursor);
+    onChange({ target: { value: before + after } });
+    setShowMentions(false);
+    setTimeout(() => el?.focus(), 0);
+  };
+
+  const filtered = members
+    .filter((m) => m.full_name && m.full_name.toLowerCase().includes(mentionQuery))
+    .slice(0, 5);
+
+  return (
+    <div style={{ position: "relative", flex: 1 }}>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={(e) => { if (e.key !== "Enter" || !showMentions) onKeyDown(e); }}
+        placeholder={placeholder}
+      />
+      {showMentions && filtered.length > 0 && (
+        <div className="if-mention-dropdown">
+          {filtered.map((m) => (
+            <button type="button" key={m.id} className="if-mention-row" onClick={() => insertMention(m.full_name)}>
+              <div className="if-avatar sm">{m.full_name[0]?.toUpperCase()}</div>
+              {m.full_name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const seedWorkspaceData = {
   2: {
     tasks: [
@@ -605,6 +701,7 @@ function AICoFounder({ idea, isLive }) {
 function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, onGoToIdea, onGoToWorkspace, notifications, onOpenNotifications, isLive }) {
   const [comment, setComment] = useState("");
   const [comments, setComments] = useState(idea.comments || []);
+  const teamMembers = useTeamMembers(isLive);
 
   useEffect(() => {
     setComments(idea.comments || []);
@@ -656,15 +753,14 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
                     <div className="if-avatar sm">{c.author[0]}</div>
                     <div>
                       <div className="if-comment-author">{c.author}</div>
-                      <div className="if-comment-text">{c.text}</div>
+                      <div className="if-comment-text">{renderWithMentions(c.text, teamMembers)}</div>
                     </div>
                   </div>
                 ))}
                 {comments.length === 0 && <p className="if-ai-empty">No comments yet — start the discussion.</p>}
               </div>
               <div className="if-comment-input">
-                <input
-                  placeholder="Add a comment..."
+                <MentionInput
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
                   onKeyDown={(e) => {
@@ -673,6 +769,8 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
                       setComment("");
                     }
                   }}
+                  placeholder="Add a comment... (@ to mention)"
+                  isLive={isLive}
                 />
                 <button
                   className="if-btn-primary sm"
@@ -875,6 +973,7 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
   const [liveMessages, setLiveMessages] = useState(messages);
   const endRef = useRef(null);
   const supabaseRef = useRef(typeof window !== "undefined" ? createClient() : null);
+  const teamMembers = useTeamMembers(isLive);
 
   useEffect(() => { setLiveMessages(messages); }, [messages]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [liveMessages.length]);
@@ -926,7 +1025,7 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
               {!mine && <div className="if-avatar sm">{m.author[0]}</div>}
               <div className={"if-wa-bubble" + (mine ? " mine" : "")}>
                 {!mine && <div className="if-wa-author">{m.author}</div>}
-                <div className="if-wa-text">{m.text}</div>
+                <div className="if-wa-text">{renderWithMentions(m.text, teamMembers)}</div>
               </div>
             </div>
           );
@@ -935,11 +1034,12 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
         <div ref={endRef} />
       </div>
       <div className="if-comment-input">
-        <input
-          placeholder="Message the team..."
+        <MentionInput
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { onSend(text.trim()); setText(""); } }}
+          placeholder="Message the team... (@ to mention)"
+          isLive={isLive}
         />
         <button className="if-btn-primary sm" onClick={() => { if (text.trim()) { onSend(text.trim()); setText(""); } }}>
           <Send size={13} />
@@ -1219,7 +1319,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
     { icon: CheckCircle2, text: "Task \u201cDefine MVP feature set\u201d completed." },
   ];
 
-  const notifIcon = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban, milestone_completed: Trophy };
+  const notifIcon = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban, milestone_completed: Trophy, mentioned: Users };
   const [liveNotifications, setLiveNotifications] = useState(null);
 
   useEffect(() => {
@@ -1721,7 +1821,11 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
         .if-comment-author { font-size:12px; font-weight:700; }
         .if-comment-text { font-size:12.5px; color:var(--text-secondary); }
         .if-comment-input { display:flex; gap:8px; }
-        .if-comment-input input { flex:1; background:var(--sunken); border:1px solid var(--panel-border); border-radius:8px; padding:8px 10px; color:var(--text); font-size:12.5px; outline:none; font-family:inherit; }
+        .if-comment-input input { flex:1; background:var(--sunken); border:1px solid var(--panel-border); border-radius:8px; padding:8px 10px; color:var(--text); font-size:12.5px; outline:none; font-family:inherit; width:100%; }
+        .if-mention-dropdown { position:absolute; bottom:calc(100% + 6px); left:0; width:220px; background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,0.4); z-index:50; padding:6px; max-height:200px; overflow-y:auto; }
+        .if-mention-row { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:transparent; border:none; color:var(--text); font-size:12.5px; padding:7px 8px; cursor:pointer; font-family:inherit; border-radius:6px; }
+        .if-mention-row:hover { background:var(--sunken); }
+        .if-mention-tag { color:var(--accent-text); font-weight:600; background:var(--accent-soft); padding:1px 4px; border-radius:4px; }
 
         .if-ai-panel { position:sticky; top:0; }
         .if-ai-empty { font-size:12.5px; color:var(--muted); line-height:1.6; }
