@@ -156,6 +156,8 @@ function MentionInput({ value, onChange, onKeyDown, placeholder, isLive }) {
   );
 }
 
+const NOTIF_ICON = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban, milestone_completed: Trophy, mentioned: Users };
+
 const seedWorkspaceData = {
   2: {
     tasks: [
@@ -715,6 +717,9 @@ function IdeaDetail({ idea, onBack, onVote, onComment, allIdeas, workspaceData, 
       })
       .catch(() => {});
     return () => { ignore = true; };
+    // Only reset when the idea itself changes; idea.comments gets a new
+    // array reference on most parent re-renders and would cause a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idea.id]);
 
   const postComment = (text) => {
@@ -879,8 +884,9 @@ function KanbanBoard({ tasks, onMove, onAdd, workspaceId, isLive }) {
 
   // Real-time: reflect task moves/adds from other team members instantly.
   useEffect(() => {
-    if (!isLive || !workspaceId || !supabaseRef.current) return;
-    const channel = supabaseRef.current
+    const supabase = supabaseRef.current;
+    if (!isLive || !workspaceId || !supabase) return;
+    const channel = supabase
       .channel(`workspace-tasks-${workspaceId}`)
       .on(
         "postgres_changes",
@@ -908,7 +914,7 @@ function KanbanBoard({ tasks, onMove, onAdd, workspaceId, isLive }) {
         }
       )
       .subscribe();
-    return () => { supabaseRef.current.removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [isLive, workspaceId]);
 
   const handleDrop = (col) => {
@@ -981,8 +987,9 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
   // Real-time: subscribe to new chat rows for this workspace so every
   // member sees messages arrive instantly, WhatsApp-style, without refresh.
   useEffect(() => {
-    if (!isLive || !workspaceId || !supabaseRef.current) return;
-    const channel = supabaseRef.current
+    const supabase = supabaseRef.current;
+    if (!isLive || !workspaceId || !supabase) return;
+    const channel = supabase
       .channel(`workspace-chat-${workspaceId}`)
       .on(
         "postgres_changes",
@@ -993,7 +1000,7 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
           if (currentUser && payload.new.user_id === currentUser.id) return;
           let authorName = "Someone";
           try {
-            const { data } = await supabaseRef.current
+            const { data } = await supabase
               .from("profiles")
               .select("full_name")
               .eq("id", payload.new.user_id)
@@ -1008,7 +1015,7 @@ function WorkspaceChat({ messages, onSend, workspaceId, currentUser, isLive }) {
         }
       )
       .subscribe();
-    return () => { supabaseRef.current.removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [isLive, workspaceId, currentUser]);
 
   return (
@@ -1319,7 +1326,6 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
     { icon: CheckCircle2, text: "Task \u201cDefine MVP feature set\u201d completed." },
   ];
 
-  const notifIcon = { idea_approved: CheckCircle2, comment_added: MessageSquare, task_assigned: FolderKanban, milestone_completed: Trophy, mentioned: Users };
   const [liveNotifications, setLiveNotifications] = useState(null);
 
   useEffect(() => {
@@ -1329,7 +1335,7 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((rows) => {
         if (ignore) return;
-        setLiveNotifications(rows.map((n) => ({ id: n.id, icon: notifIcon[n.type] || Bell, text: n.body, read: n.read })));
+        setLiveNotifications(rows.map((n) => ({ id: n.id, icon: NOTIF_ICON[n.type] || Bell, text: n.body, read: n.read })));
       })
       .catch(() => { if (!ignore) setLiveNotifications([]); });
     return () => { ignore = true; };
@@ -1346,14 +1352,14 @@ export default function IdeaFlowApp({ initialIdeas = [], currentUser = null }) {
         { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${currentUser.id}` },
         (payload) => {
           setLiveNotifications((prev) => [
-            { id: payload.new.id, icon: notifIcon[payload.new.type] || Bell, text: payload.new.body, read: false },
+            { id: payload.new.id, icon: NOTIF_ICON[payload.new.type] || Bell, text: payload.new.body, read: false },
             ...(prev || []),
           ]);
         }
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [isLive, currentUser]);
+  }, [isLive, currentUser, supabase]);
 
   const notifications = isLive ? (liveNotifications ?? []) : demoNotifications;
 
