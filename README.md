@@ -44,6 +44,7 @@ voter added as a member. No manual setup, no copy-pasting into a new tool.
 | 📁 **Documents** | Real file uploads/downloads via Supabase Storage, organized by folder |
 | 🏁 **Milestones** | Idea Approved → MVP → Beta → First Customer → Funding → Launch — click to mark complete, notifies the whole team |
 | 🤖 **AI Co-Founder** | On-demand market analysis, competitor research, tech stack, risks, and roadmap — powered by Groq (Llama 3.3 70B), free tier |
+| 🏢 **Multi-Company** | Every sign-up gets their own isolated company — invite your team, they join *your* company only. Other companies on the same deployment never see your data. |
 | 👑 **Admin Panel** | Manage team roles, send email invites, view all workspaces |
 | 🔔 **Notifications** | Real-time alerts for approvals, comments, mentions, task assignments, milestones |
 | 📊 **Analytics** | Member activity, idea status mix, task completion — all live charts |
@@ -90,20 +91,22 @@ Open [http://localhost:3000](http://localhost:3000).
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. Open the SQL editor and run `supabase/schema.sql`. This creates every
-   table, enables Row Level Security, and sets up the Postgres trigger that
-   auto-approves ideas at 75% and provisions their workspace.
+   table, enables Row Level Security, and sets up the Postgres triggers that
+   auto-approve ideas at 75% and provision their workspace.
 3. Copy your project's URL + keys into `.env.local` (see table above).
 4. `/login` works immediately via **email one-time code** — no extra setup.
    Google/GitHub sign-in are optional, see below.
-5. Make yourself an Owner (required for `/admin`):
-   ```sql
-   update profiles set role = 'owner' where id =
-     (select id from auth.users where email = 'you@example.com');
-   ```
+5. Sign up. On a fresh install, the first person to sign up directly (not
+   via an invite) automatically becomes the **Owner of their own company**
+   and gets `/admin` access — no manual SQL needed. Every company is fully
+   isolated: invite teammates from the Admin Panel and they'll join *your*
+   company only, never anyone else's data.
 
 > **Upgrading an existing project?** Run the files in `supabase/migrations/`
-> once each, in order (002 → 004). They're safe, additive fixes — see the
-> comments in each file for what they do.
+> once each, in order (002 → 005). They're safe, additive fixes — see the
+> comments in each file for what they do. Migration 005 introduces
+> multi-company support and automatically places all your existing users
+> and ideas into one company called "My Company" so nothing breaks.
 
 <details>
 <summary><strong>Optional: enable Google / GitHub sign-in</strong></summary>

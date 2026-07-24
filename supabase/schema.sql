@@ -18,6 +18,19 @@ create type task_status as enum ('todo', 'in_progress', 'review', 'completed');
 create type task_priority as enum ('low', 'medium', 'high');
 
 -- ---------------------------------------------------------------------------
+-- Organizations (companies) — every user belongs to exactly one. Ideas,
+-- workspaces, and everything inside them are scoped to an organization so
+-- multiple companies can use the same IdeaFlow deployment without seeing
+-- each other's data.
+-- ---------------------------------------------------------------------------
+create table organizations (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  created_by uuid references auth.users (id),
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
 -- Profiles (one row per authenticated user, mirrors auth.users)
 -- ---------------------------------------------------------------------------
 create table profiles (
@@ -25,19 +38,49 @@ create table profiles (
   full_name text not null,
   avatar_url text,
   role user_role not null default 'member',
+  organization_id uuid references organizations (id),
   created_at timestamptz not null default now()
 );
 
--- Auto-create a profile row whenever a new auth user signs up
+-- Auto-create a profile (and organization, if this is a direct sign-up
+-- rather than an accepted invite) whenever a new auth user signs up.
 create or replace function public.handle_new_user()
 returns trigger as $$
+declare
+  invited_org_id uuid;
+  invited_role user_role;
+  new_org_id uuid;
 begin
-  insert into public.profiles (id, full_name, avatar_url)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-    new.raw_user_meta_data->>'avatar_url'
-  );
+  invited_org_id := (new.raw_user_meta_data->>'organization_id')::uuid;
+  invited_role := (new.raw_user_meta_data->>'invited_role')::user_role;
+
+  if invited_org_id is not null then
+    -- Joined via an Admin Panel invite — attach to that organization.
+    insert into public.profiles (id, full_name, avatar_url, organization_id, role)
+    values (
+      new.id,
+      coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+      new.raw_user_meta_data->>'avatar_url',
+      invited_org_id,
+      coalesce(invited_role, 'member')
+    );
+  else
+    -- Direct sign-up — this person is starting their own company, and
+    -- becomes its Owner.
+    insert into organizations (name, created_by)
+    values (coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)) || '''s Company', new.id)
+    returning id into new_org_id;
+
+    insert into public.profiles (id, full_name, avatar_url, organization_id, role)
+    values (
+      new.id,
+      coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+      new.raw_user_meta_data->>'avatar_url',
+      new_org_id,
+      'owner'
+    );
+  end if;
+
   return new;
 end;
 $$ language plpgsql security definer;
@@ -51,6 +94,7 @@ create trigger on_auth_user_created
 -- ---------------------------------------------------------------------------
 create table ideas (
   id uuid primary key default uuid_generate_v4(),
+  organization_id uuid not null references organizations (id),
   title text not null,
   problem text,
   description text,
@@ -261,46 +305,98 @@ alter table messages enable row level security;
 alter table milestones enable row level security;
 alter table notifications enable row level security;
 
--- Profiles: everyone signed in can read profiles; users can only edit their own
-create policy "profiles are viewable by authenticated users"
-  on profiles for select using (auth.role() = 'authenticated');
+-- Profiles: only visible within your own organization; users edit their own,
+-- owners/admins can edit anyone in the same organization.
+create policy "profiles are viewable within your organization"
+  on profiles for select using (
+    organization_id = (select organization_id from profiles where id = auth.uid())
+  );
 create policy "users can update own profile"
   on profiles for update using (auth.uid() = id);
-create policy "owners and admins can update any profile"
+create policy "owners and admins can update profiles in their organization"
   on profiles for update using (
-    exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('owner', 'admin'))
+    exists (
+      select 1 from profiles p
+      where p.id = auth.uid()
+      and p.role in ('owner', 'admin')
+      and p.organization_id = profiles.organization_id
+    )
   );
 
--- Ideas: any authenticated user can read/create; only the creator or an admin/owner can edit
-create policy "ideas are viewable by authenticated users"
-  on ideas for select using (auth.role() = 'authenticated');
-create policy "authenticated users can create ideas"
-  on ideas for insert with check (auth.uid() = created_by);
+-- Ideas: only visible/creatable within your own organization; only the
+-- creator or an admin/owner in that same organization can edit.
+create policy "ideas are viewable within your organization"
+  on ideas for select using (
+    organization_id = (select organization_id from profiles where id = auth.uid())
+  );
+create policy "users can create ideas in their own organization"
+  on ideas for insert with check (
+    auth.uid() = created_by
+    and organization_id = (select organization_id from profiles where id = auth.uid())
+  );
 create policy "creator or admin can update idea"
   on ideas for update using (
     auth.uid() = created_by
-    or exists (select 1 from profiles where id = auth.uid() and role in ('owner', 'admin'))
+    or exists (
+      select 1 from profiles
+      where id = auth.uid() and role in ('owner', 'admin')
+      and organization_id = ideas.organization_id
+    )
   );
 
--- Votes: one vote per user, visible to all, only own vote editable
-create policy "votes are viewable by authenticated users"
-  on idea_votes for select using (auth.role() = 'authenticated');
+-- Votes: scoped to the same organization as the idea being voted on.
+create policy "votes are viewable within your organization"
+  on idea_votes for select using (
+    exists (
+      select 1 from ideas
+      join profiles on profiles.id = auth.uid()
+      where ideas.id = idea_votes.idea_id
+      and ideas.organization_id = profiles.organization_id
+    )
+  );
 create policy "users can cast their own vote"
-  on idea_votes for insert with check (auth.uid() = user_id);
+  on idea_votes for insert with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from ideas
+      join profiles on profiles.id = auth.uid()
+      where ideas.id = idea_votes.idea_id
+      and ideas.organization_id = profiles.organization_id
+    )
+  );
 create policy "users can change their own vote"
   on idea_votes for update using (auth.uid() = user_id);
 
--- Comments
-create policy "comments are viewable by authenticated users"
-  on idea_comments for select using (auth.role() = 'authenticated');
+-- Comments: scoped to the same organization as the idea being discussed.
+create policy "comments are viewable within your organization"
+  on idea_comments for select using (
+    exists (
+      select 1 from ideas
+      join profiles on profiles.id = auth.uid()
+      where ideas.id = idea_comments.idea_id
+      and ideas.organization_id = profiles.organization_id
+    )
+  );
 create policy "authenticated users can comment"
-  on idea_comments for insert with check (auth.uid() = user_id);
+  on idea_comments for insert with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from ideas
+      join profiles on profiles.id = auth.uid()
+      where ideas.id = idea_comments.idea_id
+      and ideas.organization_id = profiles.organization_id
+    )
+  );
 
 -- Workspaces + nested resources: restricted to workspace members
 create policy "workspace visible to its members"
   on workspaces for select using (
     exists (select 1 from workspace_members where workspace_id = id and user_id = auth.uid())
-    or exists (select 1 from profiles where id = auth.uid() and role in ('owner', 'admin'))
+    or exists (
+      select 1 from profiles p
+      join ideas i on i.id = workspaces.idea_id
+      where p.id = auth.uid() and p.role in ('owner', 'admin') and p.organization_id = i.organization_id
+    )
   );
 
 create policy "workspace_members visible to workspace members"

@@ -43,13 +43,18 @@ export async function POST(
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
     const admin = createServiceClient();
     const authorName = data.profiles?.full_name || "Someone";
-    const { data: workspace } = await admin.from("workspaces").select("name").eq("id", params.id).single();
+    const { data: workspace } = await admin
+      .from("workspaces")
+      .select("name, ideas(organization_id)")
+      .eq("id", params.id)
+      .single();
 
     await notifyMentions({
       admin,
       body,
       authorId: user.id,
       authorName,
+      organizationId: (workspace as any)?.ideas?.organization_id,
       notifBody: (name) => `${name} mentioned you in ${workspace?.name || "a workspace"} chat`,
     });
   }

@@ -42,6 +42,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
 
+  const { data: myProfile } = await supabase
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", user.id)
+    .single();
+
   const { data, error } = await supabase
     .from("ideas")
     .insert({
@@ -52,6 +58,7 @@ export async function POST(req: NextRequest) {
       priority: body.priority ?? "Medium",
       tags: body.tags ?? [],
       created_by: user.id,
+      organization_id: (myProfile as any)?.organization_id,
     })
     .select()
     .single();

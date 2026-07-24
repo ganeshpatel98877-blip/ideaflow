@@ -13,15 +13,21 @@ export default async function AdminPage() {
 
   const { data: myProfileRaw } = await supabase
     .from("profiles")
-    .select("id, full_name, role")
+    .select("id, full_name, role, organization_id")
     .eq("id", user.id)
     .single();
 
-  const myProfile = myProfileRaw as { id: string; full_name: string; role: string } | null;
+  const myProfile = myProfileRaw as { id: string; full_name: string; role: string; organization_id: string } | null;
 
   if (!myProfile || !["owner", "admin"].includes(myProfile.role)) {
     redirect("/");
   }
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("name")
+    .eq("id", myProfile!.organization_id)
+    .single();
 
   const { data: members } = await supabase
     .from("profiles")
@@ -37,6 +43,7 @@ export default async function AdminPage() {
     <main style={{ padding: 20, minHeight: "100vh", background: "#05060a" }}>
       <AdminPanel
         currentUser={myProfile}
+        organizationName={org?.name || "Your Company"}
         initialMembers={members || []}
         initialWorkspaces={(workspaces || []).map((w: any) => ({
           id: w.id,

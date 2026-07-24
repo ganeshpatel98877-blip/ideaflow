@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, organization_id")
     .eq("id", user.id)
     .single();
 
@@ -24,22 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Valid userId and role are required" }, { status: 400 });
   }
 
-  // Admins can promote/demote members and viewers, but only an Owner can
-  // grant Owner access or change another Owner's role — keeps a single
-  // source of ultimate control.
-  if (profile.role !== "owner") {
-    if (role === "owner") {
-      return NextResponse.json({ error: "Only an Owner can grant Owner access" }, { status: 403 });
-    }
-    const { data: target } = await supabase.from("profiles").select("role").eq("id", userId).single();
-    if (target?.role === "owner") {
-      return NextResponse.json({ error: "Only an Owner can change another Owner's role" }, { status: 403 });
-    }
-  }
-
-  // Row Level Security only permits self-updates on profiles (see
-  // supabase/schema.sql), so this privileged, permission-checked update
-  // goes through the service-role client instead of the RLS-scoped one.
+  // The actual update below uses the service-role client (bypasses RLS), so
+  // this route must enforce organization membership itself — otherwise an
+  // Owner/Admin from one company could edit a user in a completely
+  // different company.
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json(
       { error: "SUPABASE_SERVICE_ROLE_KEY is not set on the server — role changes require it." },
@@ -47,6 +35,24 @@ export async function POST(req: NextRequest) {
     );
   }
   const admin = createServiceClient();
+
+  const { data: target } = await admin.from("profiles").select("role, organization_id").eq("id", userId).single();
+  if (!target || target.organization_id !== profile.organization_id) {
+    return NextResponse.json({ error: "That user isn't in your organization" }, { status: 403 });
+  }
+
+  // Admins can promote/demote members and viewers, but only an Owner can
+  // grant Owner access or change another Owner's role — keeps a single
+  // source of ultimate control.
+  if (profile.role !== "owner") {
+    if (role === "owner") {
+      return NextResponse.json({ error: "Only an Owner can grant Owner access" }, { status: 403 });
+    }
+    if (target.role === "owner") {
+      return NextResponse.json({ error: "Only an Owner can change another Owner's role" }, { status: 403 });
+    }
+  }
+
   const { error } = await admin.from("profiles").update({ role }).eq("id", userId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

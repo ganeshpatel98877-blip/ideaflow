@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, organization_id")
     .eq("id", user.id)
     .single();
 
@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
 
   const admin = createServiceClient();
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { invited_role: role || "member" },
+    // organization_id tells the new-user trigger to join this company
+    // instead of creating a brand-new one for the invitee.
+    data: { invited_role: role || "member", organization_id: (profile as any).organization_id },
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -41,7 +41,7 @@ export async function POST(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    const { data: idea } = await supabase.from("ideas").select("title, created_by").eq("id", params.id).single();
+    const { data: idea } = await supabase.from("ideas").select("title, created_by, organization_id").eq("id", params.id).single();
     const authorName = data.profiles?.full_name || "Someone";
     const admin = createServiceClient();
 
@@ -62,6 +62,7 @@ export async function POST(
       body,
       authorId: user.id,
       authorName,
+      organizationId: (idea as any)?.organization_id,
       excludeUserIds: idea?.created_by ? [idea.created_by] : [],
       notifBody: (name) => `${name} mentioned you in a comment on "${idea?.title}"`,
     });

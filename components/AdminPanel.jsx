@@ -110,7 +110,7 @@ function InviteForm({ onInvite }) {
   );
 }
 
-export default function AdminPanel({ currentUser, initialMembers, initialWorkspaces }) {
+export default function AdminPanel({ currentUser, organizationName, initialMembers, initialWorkspaces }) {
   const [members, setMembers] = useState(initialMembers);
 
   const changeRole = async (userId, role) => {
@@ -165,6 +165,7 @@ export default function AdminPanel({ currentUser, initialMembers, initialWorkspa
         .ap-back:hover { color:var(--text); }
         .ap-title-row { display:flex; align-items:center; gap:10px; }
         .ap-title-row h1 { font-size:22px; margin:0; }
+        .ap-org-name { font-size:12px; color:var(--muted); margin-top:2px; }
         .ap-logo-mark { width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,#7c6fff,#4b3fce); display:flex; align-items:center; justify-content:center; }
         .ap-panel { background:var(--panel); border:1px solid var(--panel-border); border-radius:12px; padding:20px; margin-bottom:18px; }
         .ap-panel-header { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
@@ -197,7 +198,10 @@ export default function AdminPanel({ currentUser, initialMembers, initialWorkspa
       <div className="ap-topbar">
         <div className="ap-title-row">
           <div className="ap-logo-mark"><Shield size={16} color="#fff" /></div>
-          <h1>Admin Panel</h1>
+          <div>
+            <h1>Admin Panel</h1>
+            <div className="ap-org-name">{organizationName}</div>
+          </div>
         </div>
         <Link href="/" className="ap-back"><ArrowLeft size={14} /> Back to app</Link>
       </div>
